@@ -21,3 +21,6 @@ html {
 .title {
     text-decoration: none;
 }
+.photo {
+    height: 45vh;
+}
