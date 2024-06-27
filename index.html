@@ -1,27 +1,11 @@
-<!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width">
-    <title>Meme generator</title>
-    <link href="css/style.css" rel="stylesheet" type="text/css" />
-    <script src="scripts/meme.js"></script>
+  <meta charset="UTF-8">
+  <title>3D Rose</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.3.1/p5.js" integrity="sha512-a5hlZKgpC1LVAuKgVeXdP0D9Yfacj0hLtNdzx9zFMkIWRrQyO37KtIPiqArGmVuaBYu3ON6Vt0N3+G/JaLXQYQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <link rel="stylesheet" type="text/css" href="style.css">
+  <script src="sketch.js"></script>
 </head>
 <body>
-<div>
-    <button type="button" onclick="location.replace('index.html')">Meme generator</button>
-    <button type="button" onclick="location.replace('gol.html')">Game of life</button>
-</div>
-<div>
-    <img id="meme-src" src="https://i.imgur.com/aokozNt.png" class="photo" alt="Meme no text">
-</div>
-<div>
-    <input id="input-text" type="text" id="fname" name="fname">
-    <button type="button" onclick="genMeme()">Generate</button>
-</div>
-<div>
-  <canvas id="canvas" style="display: none;"></canvas>
-  <img id="meme-result" class="photo" alt="Meme text" style="display: none;">
-</div>
 </body>
 </html>
