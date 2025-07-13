@@ -43,9 +43,9 @@
       <div class="categories">
         <p class="section">Posts</p>
         <ul>
-          <li><a href="/posts?tag=all">All <span>10</span></a></li>
-          <li><a href="/posts?tag=tag1">Tag 1 <span>9</span></a></li>
-          <li><a href="/posts?tag=tag2">Tag 2 <span>3</span></a></li>
+          <li><a href="/lists?tag=all">All <span>10</span></a></li>
+          <li><a href="/lists?tag=tag1">Tag 1 <span>9</span></a></li>
+          <li><a href="/lists?tag=tag2">Tag 2 <span>3</span></a></li>
         </ul>
       </div>
     </nav>
