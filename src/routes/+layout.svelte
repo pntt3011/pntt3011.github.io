@@ -1,6 +1,22 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   let { children } = $props();
-  let expanded = true;
+  let expanded = $state(0);
+
+  function updateExpandedState(mq: MediaQueryListEvent | MediaQueryList) {
+    expanded = mq.matches ? -1 : 1;
+  }
+
+  // Initialize the expanded state based on the current viewport width
+  onMount(() => {
+    const mediaQuery = window.matchMedia("(max-width: 520px)");
+    updateExpandedState(mediaQuery);
+    mediaQuery.addEventListener("change", updateExpandedState);
+
+    return () => {
+      mediaQuery.removeEventListener("change", updateExpandedState);
+    };
+  });
 </script>
 
 <svelte:head>
@@ -13,7 +29,11 @@
 </svelte:head>
 
 <div class="app">
-  <aside class="sidebar">
+  <aside
+    class="sidebar"
+    class:expanded={expanded > 0}
+    class:collapsed={expanded < 0}
+  >
     <nav>
       <p class="blog-name">Tung Phan</p>
       <a href="/" class="home-link">
@@ -32,27 +52,28 @@
   </aside>
 
   <main>
-    <svg
-      width="32"
-      height="32"
-      viewBox="0 0 32 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      class="expand-toggle"
-    >
-      <rect
-        x="9"
-        y="23"
-        width="14"
-        height="14"
-        rx="3"
-        transform="rotate(-90 9 23)"
-        stroke="#222222"
-      />
-      <path d="M14 23L14 9" stroke="#222222" stroke-linecap="round" />
-    </svg>
+    <div>
+      <button
+        onclick={() => (expanded = -expanded)}
+        class="expand-toggle"
+        aria-label="Toggle sidebar"
+      >
+        <svg
+          width="32"
+          height="32"
+          viewBox="0 0 32 32"
+          transform="rotate(-90 0 0)"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <rect x="9" y="9" width="14" height="14" rx="3" stroke="#222222" />
+          <path d="M23 14L9 14" stroke="#222222" stroke-linecap="round" />
+        </svg>
+      </button>
+    </div>
+
     <div class="content-scroll">
-      <div style="padding-top:5rem;flex:1;">
+      <div style="padding-top:5rem;padding-bottom:5rem;flex:1;">
         <div class="content">
           {@render children()}
         </div>
@@ -78,6 +99,31 @@
     font-family: "Inter", sans-serif;
     display: flex;
     flex-direction: column;
+    white-space: nowrap;
+    overflow: hidden;
+    transition:
+      width 0.3s ease,
+      padding 0.3s ease;
+  }
+
+  @media (max-width: 520px) {
+    .sidebar {
+      width: 0;
+      padding: 1rem 0;
+      border: none;
+    }
+  }
+
+  .sidebar.expanded {
+    width: 200px;
+    padding: 1rem;
+    border-right: 1px solid #ededed;
+  }
+
+  .sidebar.collapsed {
+    width: 0;
+    padding: 1rem 0;
+    border: none;
   }
 
   .sidebar nav {
@@ -161,6 +207,9 @@
   main .expand-toggle {
     margin: 0.5rem;
     border-radius: 4px;
+    padding: 0;
+    border: none;
+    background: none;
   }
 
   main .expand-toggle:hover {
