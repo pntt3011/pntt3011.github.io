@@ -52,25 +52,23 @@
   </aside>
 
   <main>
-    <div>
-      <button
-        onclick={() => (expanded = -expanded)}
-        class="expand-toggle"
-        aria-label="Toggle sidebar"
+    <button
+      onclick={() => (expanded = -expanded)}
+      class="expand-toggle"
+      aria-label="Toggle sidebar"
+    >
+      <svg
+        width="32"
+        height="32"
+        viewBox="0 0 32 32"
+        transform="rotate(-90 0 0)"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
       >
-        <svg
-          width="32"
-          height="32"
-          viewBox="0 0 32 32"
-          transform="rotate(-90 0 0)"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <rect x="9" y="9" width="14" height="14" rx="3" stroke="#222222" />
-          <path d="M23 14L9 14" stroke="#222222" stroke-linecap="round" />
-        </svg>
-      </button>
-    </div>
+        <rect x="9" y="9" width="14" height="14" rx="3" stroke="#222222" />
+        <path d="M23 14L9 14" stroke="#222222" stroke-linecap="round" />
+      </svg>
+    </button>
 
     <div class="content-scroll">
       <div style="padding-top:5rem;padding-bottom:5rem;flex:1;">
@@ -179,15 +177,6 @@
     padding: 0;
   }
 
-  .sidebar nav .categories li {
-    padding: 0.5rem 0.5rem 0.5rem 1rem;
-    border-radius: 4px;
-  }
-
-  .sidebar nav .categories li:hover {
-    background-color: #f1f1f2;
-  }
-
   .sidebar nav .categories li a {
     display: flex;
     font-size: 0.8rem; /* 12.8px */
@@ -195,17 +184,24 @@
     justify-content: space-between;
     color: #323334;
     text-decoration: none;
+    padding: 0.5rem 0.5rem 0.5rem 1rem;
+    border-radius: 4px;
+  }
+
+  .sidebar nav .categories li a:hover {
+    background-color: #f1f1f2;
   }
 
   main {
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
+    position: relative;
+    width: 100%;
+    height: 100vh;
   }
 
   main .expand-toggle {
-    margin: 0.5rem;
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
     border-radius: 4px;
     padding: 0;
     border: none;
@@ -218,8 +214,9 @@
   }
 
   main .content-scroll {
+    width: 100%;
+    height: 100vh;
     overflow-y: auto;
-    flex: 1;
   }
 
   main .content {
