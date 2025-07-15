@@ -17,7 +17,7 @@
   <h1>All blogs</h1>
   <div class="post-list">
     {#each posts as post}
-      <a class="post-preview" href="/posts">
+      <a class="post-preview" href="/posts/test">
         <h3>{post.title}</h3>
         <p class="date">{post.date}</p>
         <p>{post.excerpt}</p>
