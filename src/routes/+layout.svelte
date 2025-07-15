@@ -1,4 +1,5 @@
 <script lang="ts">
+  import tags from "$lib/tags.json";
   import { onMount } from "svelte";
   let { children } = $props();
   let expanded = $state(0);
@@ -43,9 +44,14 @@
       <div class="categories">
         <p class="section">Posts</p>
         <ul>
-          <li><a href="/lists?tag=all">All <span>10</span></a></li>
-          <li><a href="/lists?tag=tag1">Tag 1 <span>9</span></a></li>
-          <li><a href="/lists?tag=tag2">Tag 2 <span>3</span></a></li>
+          {#each tags as tag}
+            <li>
+              <a href={`/lists?tag=${tag.tag}`}>
+                {tag.tag.charAt(0).toUpperCase() + tag.tag.slice(1)}
+                <span>{tag.count}</span>
+              </a>
+            </li>
+          {/each}
         </ul>
       </div>
     </nav>
