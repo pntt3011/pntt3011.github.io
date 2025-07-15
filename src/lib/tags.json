@@ -1,14 +1,18 @@
 [
     {
         "tag": "all",
-        "count": 1
+        "count": 2
+    },
+    {
+        "tag": "robot",
+        "count": 2
     },
     {
         "tag": "agriculture",
         "count": 1
     },
     {
-        "tag": "robot",
+        "tag": "sea",
         "count": 1
     }
 ]
