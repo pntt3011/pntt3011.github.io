@@ -1,26 +1,28 @@
 <script lang="ts">
-  interface Post {
-    title: string;
-    date: string;
-    excerpt: string;
-  }
+  import posts from "$lib/posts.json";
+  import { page } from "$app/state";
+  import { type ClientPost, type Post, converToClientPost } from "$lib/types";
 
-  let posts: Post[] = Array.from({ length: 6 }, (_, i) => ({
-    title: "Lorem ipsum dolor sit amet",
-    date: "07/07/2025",
-    excerpt:
-      "Vivamus at quam a tortor imperdiet ullamcorper ac sed urna. In venenatis pharetra nibh vel egestas...",
-  }));
+  const client_posts: ClientPost[] = posts.map((post: Post) => converToClientPost(post));
+
+  const tag = $derived(page.url.searchParams.get("tag"));
+  const filtered_posts = $derived(getFiltedPost(tag));
+
+  function getFiltedPost(tag: string | null): ClientPost[] {
+    return client_posts.filter(
+      (post) => !tag || tag == "all" || post.tags?.includes(tag),
+    );
+  }
 </script>
 
 <section>
-  <h1>All blogs</h1>
+  <h1>{tag.charAt(0).toUpperCase() + tag.slice(1)} blogs</h1>
   <div class="post-list">
-    {#each posts as post}
-      <a class="post-preview" href="/posts/test">
+    {#each filtered_posts as post}
+      <a class="post-preview" href="/posts/{post.id}">
         <h3>{post.title}</h3>
-        <p class="date">{post.date}</p>
-        <p>{post.excerpt}</p>
+        <p class="date">{post.creation_time}</p>
+        <p>{post.preview}</p>
       </a>
     {/each}
   </div>
@@ -75,8 +77,9 @@
   }
 
   .post-preview p {
+    text-align: justify;
     font-size: 0.875rem;
-    line-height: 1.125rem;
+    line-height: 1.25rem;
     color: #323334;
   }
 </style>

@@ -1,19 +1,30 @@
 <script lang="ts">
+  import posts from "$lib/posts.json";
+  import { page } from "$app/state";
+  import { type ClientPost, type Post, converToClientPost } from "$lib/types";
+
   let { children } = $props();
+  const post: Post | null = posts.find(
+    (p: Post) => p.id === page.url.pathname.split("/").pop(),
+  );
+  const client_posts: ClientPost | null = post
+    ? converToClientPost(post)
+    : null;
 </script>
 
 <svelte:head>
-  <title>Post Layout</title>
+  <title>{post?.title}</title>
 </svelte:head>
 
 <section class="post">
-  <h1 class="title">Lorem ipsum dolor sit amet</h1>
+  <h1 class="title">{post?.title}</h1>
 
   <div class="auxiliary">
-    <p class="date">07/07/2025</p>
+    <p class="date">{post?.creation_time}</p>
     <div class="tags">
-      <span class="tag">Tag 1</span>
-      <span class="tag">Tag 2</span>
+      {#each post?.tags ?? [] as tag}
+        <span class="tag">{tag}</span>
+      {/each}
     </div>
   </div>
 
