@@ -1,22 +1,12 @@
 [
     {
-        "id": "20250715171254",
-        "title": "Title2",
-        "creation_time": 1752574374,
-        "tags": [
-            "robot",
-            "sea"
-        ],
-        "preview": "hahaahahah"
-    },
-    {
         "id": "20250714211041",
-        "title": "Title1",
+        "title": "Personal Blog V1",
         "creation_time": 1752502241,
         "tags": [
-            "robot",
-            "agriculture"
+            "DIY",
+            "web"
         ],
-        "preview": "This is some preview. I am not sure if this is long enough to test the UI. Maybe I should add more sentences. But I don't know what to write about, maybe a song? I'm not good at singing either. Hmmm!"
+        "preview": "This post doesn't deep dive into using any specific tool or framework. It's more about how I frame my problem and design a solution for it."
     }
 ]
