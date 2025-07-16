@@ -95,13 +95,14 @@ class Photo:
 		return target_photo
 
 class Config:
-	def __init__(self, markdown_dir: str, md_media_dir: str, html_dir: str, html_media_dir: str, image_size_max: int, image_size_percentage: float, data_dir: str):
+	def __init__(self, markdown_dir: str, md_media_dir: str, html_dir: str, html_media_dir: str, image_size_max: int, max_width_parent_percent: float, max_height_view_percent: float, data_dir: str):
 		self.markdown_dir = markdown_dir
 		self.md_media_dir = md_media_dir
 		self.html_dir = html_dir
 		self.html_media_dir = html_media_dir
 		self.image_size_max = image_size_max
-		self.image_size_percentage = image_size_percentage
+		self.max_width_parent_percent = max_width_parent_percent
+		self.max_height_view_percent = max_height_view_percent
 		self.post_metadata_path = os.path.join(data_dir, "posts.json")
 		self.tag_metadata_path = os.path.join(data_dir, "tags.json")
 
@@ -168,10 +169,9 @@ def init_markdown_parser(config: Config, html_media_data: dict[str, Photo]) -> M
 			width = html_media_data[src].width
 			height = html_media_data[src].height
 			if height > width:
-				percent_width = int(config.image_size_percentage * 100 * width / height)
+				style=f"width: auto; max-height: {int(config.max_height_view_percent * 100)}vh; margin-left: auto; margin-right: auto;"
 			else:
-				percent_width = int(config.image_size_percentage * 100)
-			style=f"max-width: {percent_width}%; height: auto; margin-left: auto; margin-right: auto;"
+				style=f"max-width: {int(config.max_width_parent_percent * 100)}%; height: auto; margin-left: auto; margin-right: auto;"
 			return f'<img class="image-box" loading="lazy" src="{static_src}" alt="{alt}" width="{width}" height="{height}" style="{style}"/>'
 		return self.image(tokens, idx, options, env)
 
@@ -312,7 +312,8 @@ if __name__ == "__main__":
 		html_dir="src/routes/posts",
 		html_media_dir="static/media",
 		image_size_max=1024,
-		image_size_percentage=0.8,
+		max_width_parent_percent=0.8,
+		max_height_view_percent=0.7,
 		data_dir="src/lib"
 	) 
 	generate_html_for_markdown_folder(config)
