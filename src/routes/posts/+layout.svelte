@@ -15,7 +15,7 @@
 
   onMount(() => {
     const post: Post | undefined = posts.find(
-      (p: Post) => p.id === page.url.pathname.split("/").pop(),
+      (p: Post) => p.id === page.url.pathname.split("/").filter(Boolean).pop(),
     );
     if (post) {
       client_posts = converToClientPost(post);

@@ -11,7 +11,7 @@ export type ClientPost = {
     title: string;
     preview: string;
     creation_time: string;
-    tags?: string[];
+    tags: string[];
 };
 
 export function converToClientPost(post: Post): ClientPost {
@@ -20,7 +20,7 @@ export function converToClientPost(post: Post): ClientPost {
         title: post.title,
         preview: post.preview,
         creation_time: formatDate(post.creation_time),
-        tags: post.tags ? post.tags.map(tag => tag.toLowerCase()) : []
+        tags: post.tags?.map(tag => tag.toLowerCase()) ?? []
     };
 }
 
