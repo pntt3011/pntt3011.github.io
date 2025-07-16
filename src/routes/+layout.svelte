@@ -2,20 +2,20 @@
   import tags from "$lib/tags.json";
   import { page } from "$app/state";
   import { onMount } from "svelte";
+  import { afterNavigate } from "$app/navigation";
+
   let { children } = $props();
   let expanded = $state(0);
 
   let isHomepage = $derived(false);
   let selectedTag = $derived("");
 
-  onMount(() => {
+  afterNavigate(() => {
     isHomepage = page.url.pathname === "/";
-    selectedTag = 
+    selectedTag =
       page.url.pathname === "/lists/"
-        ? page.url.searchParams.get("tag")
-          ? page.url.searchParams.get("tag")
-          : "all"
-        : ""
+        ? (page.url.searchParams.get("tag") ?? "all")
+        : "";
   });
 
   function updateExpandedState(mq: MediaQueryListEvent | MediaQueryList) {
@@ -62,7 +62,8 @@
             <li>
               <a
                 href={`/lists?tag=${tag.tag}`}
-                class:active={selectedTag.toLowerCase() === tag.tag.toLowerCase()}
+                class:active={selectedTag.toLowerCase() ===
+                  tag.tag.toLowerCase()}
               >
                 {tag.tag.charAt(0).toUpperCase() + tag.tag.slice(1)}
                 <span>{tag.count}</span>
