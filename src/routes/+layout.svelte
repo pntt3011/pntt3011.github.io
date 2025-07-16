@@ -1,8 +1,19 @@
 <script lang="ts">
   import tags from "$lib/tags.json";
+  import { page } from "$app/state";
   import { onMount } from "svelte";
   let { children } = $props();
   let expanded = $state(0);
+
+  let isHomepage = $derived(page.url.pathname === "/");
+  let isLists = $derived(page.url.pathname === "/lists");
+  let selectedTag = $derived(
+    isLists
+      ? page.url.searchParams.get("tag")
+        ? page.url.searchParams.get("tag")?.toLowerCase()
+        : "all"
+      : "",
+  );
 
   function updateExpandedState(mq: MediaQueryListEvent | MediaQueryList) {
     expanded = mq.matches ? -1 : 1;
@@ -37,7 +48,7 @@
   >
     <nav>
       <p class="blog-name">Tung Phan</p>
-      <a href="/" class="home-link">
+      <a href="/" class="home-link" class:active={isHomepage}>
         <p>🏠</p>
         <p>Home</p>
       </a>
@@ -46,7 +57,10 @@
         <ul>
           {#each tags as tag}
             <li>
-              <a href={`/lists?tag=${tag.tag}`}>
+              <a
+                href={`/lists?tag=${tag.tag}`}
+                class:active={selectedTag === tag.tag}
+              >
                 {tag.tag.charAt(0).toUpperCase() + tag.tag.slice(1)}
                 <span>{tag.count}</span>
               </a>
@@ -153,11 +167,16 @@
     gap: 0.5rem;
     font-size: 0.8rem; /* 12.8px */
     text-decoration: none; /* Remove underline */
+    color: #323334;
     padding: 0.5rem 1rem;
     border-radius: 4px;
   }
 
   .sidebar nav .home-link:hover {
+    background-color: #f1f1f2;
+  }
+
+  .sidebar nav .home-link.active {
     background-color: #f1f1f2;
   }
 
@@ -195,6 +214,10 @@
   }
 
   .sidebar nav .categories li a:hover {
+    background-color: #f1f1f2;
+  }
+
+  .sidebar nav .categories li a.active {
     background-color: #f1f1f2;
   }
 
