@@ -5,15 +5,18 @@
   let { children } = $props();
   let expanded = $state(0);
 
-  let isHomepage = $derived(page.url.pathname === "/");
-  let isLists = $derived(page.url.pathname === "/lists");
-  let selectedTag = $derived(
-    isLists
-      ? page.url.searchParams.get("tag")
+  let isHomepage = $derived(false);
+  let selectedTag = $derived("");
+
+  onMount(() => {
+    isHomepage = page.url.pathname === "/";
+    selectedTag = 
+      page.url.pathname === "/lists/"
         ? page.url.searchParams.get("tag")
-        : "all"
-      : "",
-  );
+          ? page.url.searchParams.get("tag")
+          : "all"
+        : ""
+  });
 
   function updateExpandedState(mq: MediaQueryListEvent | MediaQueryList) {
     expanded = mq.matches ? -1 : 1;

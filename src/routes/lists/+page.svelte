@@ -1,14 +1,20 @@
 <script lang="ts">
   import posts from "$lib/posts.json";
   import { page } from "$app/state";
+  import { onMount } from "svelte";
   import { type ClientPost, type Post, converToClientPost } from "$lib/types";
 
   const client_posts: ClientPost[] = posts.map((post: Post) =>
     converToClientPost(post),
   );
 
-  const tag = $derived(page.url.searchParams.get("tag"));
-  const filtered_posts = $derived(getFiltedPost(tag));
+  let filtered_posts = $derived([]);
+  let tag = $derived("all");
+
+  onMount(() => {
+    tag = page.url.searchParams.get("tag") || "all";
+    filtered_posts = getFiltedPost(tag);
+  });
 
   function getFiltedPost(tag: string | null): ClientPost[] {
     return client_posts.filter(
