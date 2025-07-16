@@ -3,7 +3,9 @@
   import { page } from "$app/state";
   import { type ClientPost, type Post, converToClientPost } from "$lib/types";
 
-  const client_posts: ClientPost[] = posts.map((post: Post) => converToClientPost(post));
+  const client_posts: ClientPost[] = posts.map((post: Post) =>
+    converToClientPost(post),
+  );
 
   const tag = $derived(page.url.searchParams.get("tag"));
   const filtered_posts = $derived(getFiltedPost(tag));
@@ -14,6 +16,18 @@
     );
   }
 </script>
+
+<svelte:head>
+  <title
+    >{tag
+      ? `${tag.charAt(0).toUpperCase() + tag.slice(1)} blogs`
+      : "All blogs"}</title
+  >
+  <meta
+    name="description"
+    content="A collection of blogs categorized by tags."
+  />
+</svelte:head>
 
 <section>
   <h1>{tag.charAt(0).toUpperCase() + tag.slice(1)} blogs</h1>

@@ -1,3 +1,10 @@
+<svelte:head>
+  <title>Tung Phan</title>
+  <meta name="description" content="A blog about my projects and ideas." />
+  <meta name="keywords" content="blog, projects, ideas, learning, writing" />
+  <meta name="author" content="Tung Phan" />
+</svelte:head>
+
 <section>
   <p>
     Hello I'm Tung Phan. I live in Vietnam and recently graduated from
