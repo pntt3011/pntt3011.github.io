@@ -10,7 +10,7 @@
   let selectedTag = $derived(
     isLists
       ? page.url.searchParams.get("tag")
-        ? page.url.searchParams.get("tag")?.toLowerCase()
+        ? page.url.searchParams.get("tag")
         : "all"
       : "",
   );
@@ -59,7 +59,7 @@
             <li>
               <a
                 href={`/lists?tag=${tag.tag}`}
-                class:active={selectedTag === tag.tag}
+                class:active={selectedTag.toLowerCase() === tag.tag.toLowerCase()}
               >
                 {tag.tag.charAt(0).toUpperCase() + tag.tag.slice(1)}
                 <span>{tag.count}</span>

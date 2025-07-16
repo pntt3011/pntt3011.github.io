@@ -12,7 +12,7 @@
 
   function getFiltedPost(tag: string | null): ClientPost[] {
     return client_posts.filter(
-      (post) => !tag || tag == "all" || post.tags?.includes(tag),
+      (post) => !tag || tag == "all" || post.tags?.map((tag) => tag.toLowerCase()).includes(tag.toLowerCase()),
     );
   }
 </script>
