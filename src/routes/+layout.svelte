@@ -119,8 +119,7 @@
     padding: 1rem;
     border-right: 1px solid #ededed;
     font-family: "Inter", sans-serif;
-    display: flex;
-    flex-direction: column;
+    flex: none;
     white-space: nowrap;
     overflow: hidden;
     transition:
