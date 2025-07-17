@@ -168,10 +168,10 @@ def init_markdown_parser(config: Config, html_media_data: dict[str, Photo]) -> M
 			alt = token.attrs.get("alt", "")
 			width = html_media_data[src].width
 			height = html_media_data[src].height
-			if height > width:
-				style=f"width: auto; max-height: {int(config.max_height_view_percent * 100)}vh; margin-left: auto; margin-right: auto;"
-			else:
-				style=f"max-width: {int(config.max_width_parent_percent * 100)}%; height: auto; margin-left: auto; margin-right: auto;"
+			max_width = int(config.max_width_parent_percent * 100)
+			max_height = int(config.max_height_view_percent * 100)
+			style=f"max-width: {max_width}%; max-height: {max_height}vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"
+			
 			return f'<img class="image-box" loading="lazy" src="{static_src}" alt="{alt}" width="{width}" height="{height}" style="{style}"/>'
 		return self.image(tokens, idx, options, env)
 

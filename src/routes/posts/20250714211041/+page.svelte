@@ -113,9 +113,9 @@
 <p>Now, I’m facing the second most painful part: <strong>where to get that template</strong>. Most blogs I read contain more information than I need for my use case. And when I imagine removing all the irrelevant elements, the remaining layout often feels awkward. I've tried searching for minimalist UIs, but many still give me an uneasy feeling. For example, the homepage banner often stretches across the entire page width, which is unnecessarily large for what I want.</p>
 <p>Let's ask ChatGPT to generate one. The design is clean and simple, yet I'm still unsatisfied. Sometimes I cannot describe my feeling well, and this time is no exception. I want to look through a few more blogs. This step is mostly based on personal tastes, so it may take a while.</p>
 <p>After some time, I find that the page <a href="https://garry.net/">garry.net</a> appealed to me. The difference lies in its vertical navigation instead of a horizontal one. I realize that this layout is also used in the Steam Store, which may explain my preference.</p>
-<img class="image-box" loading="lazy" src="/media/Pasted_image_20250709154252.png" alt="" width="507" height="569" style="width: auto; max-height: 70vh; margin-left: auto; margin-right: auto;"/>
+<img class="image-box" loading="lazy" src="/media/Pasted_image_20250709154252.png" alt="" width="507" height="569" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/>
 <p>Now, I have enough material to start sketching the website. My favorite tool is <a href="https://www.tldraw.com/">tldraw</a> because of its handwritten style and infinite canvas. I can draw anything I want, anywhere. To avoid missing any UI element, I'll go through each feature and sketch either its visual component or the interaction between components. With so few features, I can cramp all of them into one place. If that's not possible, I have to split them based on their functions.</p>
-<img class="image-box" loading="lazy" src="/media/Pasted_image_20250709164518.png" alt="" width="798" height="590" style="max-width: 80%; height: auto; margin-left: auto; margin-right: auto;"/>
+<img class="image-box" loading="lazy" src="/media/Pasted_image_20250709164518.png" alt="" width="798" height="590" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/>
 <p>You can see two red areas and some green boxes in the draft above. These problems were overlooked previously and only discovered while drawing the UI. This is inevitable and expected to happen more often in complex applications. One of the issues is the scrolling behavior whenever a post is too long, let's call it feature 10: Readers can scroll vertically if the post content is longer than the screen height.</p>
 <p>As for the rest (text rule and green boxes), I call this business logic. To put it simply:</p>
 <ul>
@@ -218,7 +218,7 @@ Ask yourself &quot;If the relevant value changes to something random, do the cor
 <li>n - n: e.g. one post contains many tags, and one tag can appear in many posts.</li>
 </ul>
 <p>Here is the data diagram of my blog (credit to <a href="https://www.tldraw.com/">tldraw</a>, again)</p>
-<img class="image-box" loading="lazy" src="/media/Pasted_image_20250714090725.png" alt="" width="1024" height="482" style="max-width: 80%; height: auto; margin-left: auto; margin-right: auto;"/>
+<img class="image-box" loading="lazy" src="/media/Pasted_image_20250714090725.png" alt="" width="1024" height="482" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/>
 <p>Why do I need this diagram?<br />
 The relationships demonstrate the contraints among the data, which creates data consistency. Without this diagram, I may show a tag that no post have or a post with no title. I'll discuss more later in the database section.</p>
 <p>Now that I’ve finished all the planning, let’s proceed to implement each part.</p>
@@ -244,10 +244,10 @@ But 1920px is too wide for comfort reading. I think a text line should contain a
 I also set the <strong>maximum width of images to 80% (whatever value you like)</strong> of the text content width. Just note here for later uses, since Figma doesn't allow us to set this constraint.<br />
 I’m not concerned about vertical height limits, as readers can always scroll down if needed.</p>
 <p>After some trial and error, I've come up with this page design. It's not too complex but I'm proud of it.</p>
-<img class="image-box" loading="lazy" src="/media/Pasted_image_20250711172344.png" alt="" width="1024" height="557" style="max-width: 80%; height: auto; margin-left: auto; margin-right: auto;"/>
+<img class="image-box" loading="lazy" src="/media/Pasted_image_20250711172344.png" alt="" width="1024" height="557" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/>
 <p>The UI works perfectly ... as long as the screen width is higher than 520px. I set the minimum width for the content to 320px correctly in Figma. However, the sidebar width hasn’t been accounted for yet, not to mention the padding. So the actual minimum width is around 520px.</p>
 <p>An easy yet elegant solution is to make the sidebar collapsible, you can see one in ChatGPT. I'll need to add an icon at the top-left corner and design an alternate UI for when it's triggered (basically just removing the sidebar). Now, my UI can display correctly even on 320px-wide screen.</p>
-<img class="image-box" loading="lazy" src="/media/Pasted_image_20250711204529.png" alt="" width="691" height="597" style="max-width: 80%; height: auto; margin-left: auto; margin-right: auto;"/>
+<img class="image-box" loading="lazy" src="/media/Pasted_image_20250711204529.png" alt="" width="691" height="597" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/>
 <h2>Choosing a programming language for UI</h2>
 <p>Now that the design is finished, it's time to make the interface accessible on a website. I can’t just give users the Figma link, you know? Technically, it's possible but far too inconvenient.</p>
 <p>The most common approach is to choose a web hosting service and have it run some code. I'll deal with the coding part first, since I can test the UI and logic locally before publishing to any hosting platform.</p>
@@ -329,7 +329,7 @@ After trial and error, the solution is feasible by using traditional CSS with <c
 <p>The completed code can be found in this <a href="https://github.com/pntt3011/pntt3011.github.io/tree/0df8e987f2e297d05d4fd4a404c92ec08292ff17">commit</a>.</p>
 <h2>Creating my first database</h2>
 <p>Remember the data diagram above, let's make another version. This time I'll ask whether a data persists or not when readers close the website.</p>
-<img class="image-box" loading="lazy" src="/media/Pasted_image_20250714151905.png" alt="" width="1024" height="435" style="max-width: 80%; height: auto; margin-left: auto; margin-right: auto;"/>
+<img class="image-box" loading="lazy" src="/media/Pasted_image_20250714151905.png" alt="" width="1024" height="435" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/>
 <p>Why do I need this?<br />
 All persistent data must be available somewhere before users can see them.</p>
 <ul>
