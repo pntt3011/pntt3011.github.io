@@ -401,7 +401,7 @@ That's exactly what I intent to do now. But I just need to generate the data onl
 If I do that, the browser will load the content of <strong>ALL</strong> posts when loading the post list. Think about the memory capacity, you should have the answer.</p>
 <p>Finally, I only have the &quot;tags&quot; data left. Another question: Do I really need to generate one? Isn't already available in the &quot;posts&quot; data?<br />
 <strong>It's totally fine to derive the tag data from the post data</strong>. Users are likely to open the post list anyway so loading the data first should be more efficient. However, since I have bad impression of Javascript and HTML syntax, I want to write them as least as possible. I'll create another JSON file so that I can show directly what I read.</p>
-<pre><code>	'tag'\: string,
+<pre><code>	'tag': string,
 	'count': number
 </code></pre>
 <p><strong>Remember to automate the JSON step with Python too.</strong></p>
