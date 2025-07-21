@@ -1,24 +1,27 @@
 <script lang="ts">
   import posts from "$lib/posts.json";
   import { page } from "$app/state";
-  import { onMount } from "svelte";
+  import { afterNavigate } from "$app/navigation";
   import { type ClientPost, type Post, converToClientPost } from "$lib/types";
 
   const client_posts: ClientPost[] = posts.map((post: Post) =>
     converToClientPost(post),
   );
 
-  let filtered_posts = $derived([]);
+  let filtered_posts: ClientPost[] = $derived([]);
   let tag = $derived("all");
 
-  onMount(() => {
+  afterNavigate(() => {
     tag = page.url.searchParams.get("tag") || "all";
     filtered_posts = getFiltedPost(tag);
   });
 
   function getFiltedPost(tag: string | null): ClientPost[] {
     return client_posts.filter(
-      (post) => !tag || tag == "all" || post.tags?.map((tag) => tag.toLowerCase()).includes(tag.toLowerCase()),
+      (post) =>
+        !tag ||
+        tag == "all" ||
+        post.tags?.map((tag) => tag.toLowerCase()).includes(tag.toLowerCase()),
     );
   }
 </script>
