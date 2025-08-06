@@ -430,6 +430,7 @@ Let's compare the two data diagrams. I can notice a similarity: all persistent d
 </li>
 </ul>
 <p>Thanks for reading!</p>
+<p>You can always get the latest version of the code at: <a href="https://github.com/pntt3011/pntt3011.github.io">link</a></p>
 
 		</section>
 	
