@@ -1,5 +1,14 @@
 [
     {
+        "id": "20250814222523",
+        "title": "Synchronize folders across devices",
+        "creation_time": 1755185123,
+        "tags": [
+            "networking"
+        ],
+        "preview": "If you just want the tool name, Syncthing + Tailscale. If you want to understand how these tools work (in a funny way), this post is for you."
+    },
+    {
         "id": "20250714211041",
         "title": "Personal Blog V1",
         "creation_time": 1752502241,
