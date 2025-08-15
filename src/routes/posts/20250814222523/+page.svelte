@@ -102,9 +102,7 @@ Maybe it works ... but not for me.</p>
 <p>Somehow my devices can't find each other. To tell the truth, I don't know the reason.<br />
 This seems to be a popular issue, you can easily find many dicussion about this (<a href="https://forum.syncthing.net/t/syncthing-dial-tcp-i-o-timeout/22028/10">link</a> or <a href="https://forum.syncthing.net/t/connection-issue-i-o-timeout-connection-refused/15671">link</a>)</p>
 <p>I need to find a more reliable solution. Fortunately, I just need to make my devices visible to each other, all the synchronization are already handled by Syncthing.</p>
-<p>That's when I discover Tailscale, a free and open-source VPN.<br />
-What is a VPN?<br />
-Remember the dorm example above, VPN (virtual private network) means you and your friend live in a same &quot;virtual&quot; dormitory.</p>
+<p>That's when I discover Tailscale, a free and open-source application dedicated to connecting devices.</p>
 <p>Why does that solve my problem?<br />
 To be frank, I don't understand what the problem actually is. I just try and it works.<br />
 After reading the Tailscale <a href="https://tailscale.com/blog/how-nat-traversal-works">post</a>, I notice one thing that Syncthing does not mention. Those might be what Syncthing is missing.</p>
