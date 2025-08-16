@@ -42,8 +42,7 @@ Both of you know exactly where they are. You can simply tell them &quot;if anyon
 Your friend goes there, asks where you are, and tells them the same thing.<br />
 Voila, problems solve.</p>
 <p>Wait, wait. Shouldn't we contact with outsider through the manager, does he even allow that type of messages?<br />
-Great observation. That where the &quot;p/s&quot; shines. You and your friends must prepare some kind of cipher that only both of you understand beforehand.</p>
-<p>Indeed, in the world of Internet, most of the messages are encrypted before transmitting.</p>
+Great observation. That where the &quot;p/s&quot; shines. You and your friends must prepare some kind of cipher that only both of you understand beforehand. Indeed, in the world of Internet, this's called &quot;protocol&quot;.</p>
 <img class="image-box" loading="lazy" src="/media/Pasted_image_20250814170005.png" alt="" width="1024" height="309" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/>
 <p>However, that's not the end of this nuisance.<br />
 The dorm manager also has his own room mapping.<br />
