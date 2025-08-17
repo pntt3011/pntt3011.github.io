@@ -1,10 +1,28 @@
 import os
 import re
+import json
 
 from markdown_it import MarkdownIt
 from mdit_py_plugins.front_matter import front_matter_plugin
 from PIL import Image
 from datetime import datetime
+
+class PostJson:
+	def __init__(self, **kwargs):
+		self.id = kwargs.get('id', '-1')
+		self.title = kwargs.get('title', '')
+		self.creation_time = kwargs.get('creation_time', 0)
+		self.tags = kwargs.get('tags', [])
+		self.preview = kwargs.get('preview', '')
+
+	def to_dict(self):
+		return {
+            'id': self.id,
+            'title': self.title,
+            'creation_time': self.creation_time,
+            'tags': self.tags,
+            'preview': self.preview
+        }
 
 class Post:
 	def __init__(self, filename: str, directory: str):
@@ -258,36 +276,54 @@ def write_svelte_content_to_file(svelte_content: str, svelte_dir: str) -> None:
 		svelte_file.write(svelte_content)
 
 def generate_metadata_for_markdown_folder(config: Config) -> None:
-	post_metadata = get_post_metadata(config.markdown_dir)
+	old_post_metadata = read_post_metadata(config.post_metadata_path)
+	new_post_metadata = get_post_metadata(config.markdown_dir)
+	post_metadata = merge_post_metadata_by_id(old_post_metadata, new_post_metadata)
 	write_post_metadata(post_metadata, config.post_metadata_path)
 	tag_metadata = parse_tag_metadata(post_metadata)
 	write_tag_metadata(tag_metadata, config)
 
-def get_post_metadata(md_dir: str) -> list[Post]:
+def read_post_metadata(path: str) -> list[PostJson]:
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return [PostJson(**item) for item in data]
+    except (json.JSONDecodeError, IOError):
+        return []
+
+def get_post_metadata(md_dir: str) -> list[PostJson]:
 	metadata = []
 	for filename in os.listdir(md_dir):
 		if filename.endswith('.md'):
 			post = Post(filename, md_dir)
 			if post.is_valid():
 				metadata.append(post)
-	metadata.sort(key=lambda x: x.creation_time, reverse=True)
-	return metadata
 
-def write_post_metadata(post_metadata: list[Post], post_metadata_path: str) -> None:
-	json_data = [{
+	return [PostJson(**{
 		"id": post.id,
 		"title": post.title,
 		"creation_time": post.creation_time,
 		"tags": post.tags,
 		"preview": post.preview,
-	} for post in post_metadata if post.is_valid()]
+	}) for post in metadata if post.is_valid()]
 
+
+def merge_post_metadata_by_id(old_data: list[PostJson], new_data: list[PostJson]) -> list[PostJson]:
+    merged = {item.id: item for item in old_data}  # use dict to deduplicate by id
+    for item in new_data:
+        merged[item.id] = item  # will overwrite duplicates from old_data
+    merged_list = list(merged.values())
+    merged_list.sort(key=lambda x: x.creation_time, reverse=True)
+    return merged_list
+
+def write_post_metadata(data: list[PostJson], post_metadata_path: str) -> None:
 	os.makedirs(os.path.dirname(post_metadata_path), exist_ok=True)
 	with open(post_metadata_path, 'w', encoding='utf-8') as file:
-		import json
-		json.dump(json_data, file, indent=4, ensure_ascii=False)
+		json.dump([item.to_dict() for item in data], file, indent=4, ensure_ascii=False)
 
-def parse_tag_metadata(post_metadata: list[Post]) -> list[dict[str, int]]:
+def parse_tag_metadata(post_metadata: list[PostJson]) -> list[dict[str, int]]:
 	tag_dict = {}
 	for post in post_metadata:
 		for tag in post.tags:
