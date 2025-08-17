@@ -202,7 +202,7 @@ If none of them is your problem, which is true in my case, this method is worth 
 <h2>Last but not least, connection</h2>
 <p>Just use Tailscale.<br />
 I can't recommend that enough. There are so many mind-blowing techniques in this small application.<br />
-You can read more about how it works in <a href="https://pntt3011.github.io/posts/20250814222523/">this post</a></p>
+You can read more about how it works in <a href="https://pntt3011.github.io/posts/20250814222523/">this post</a>.</p>
 <h2>Conclusion</h2>
 <p>This project had been nurtured for a long time. I only got the chance to bring it to life now. There were more issues than I had expected, it also took longer time to develop as I needed to learn many new things along the way. However, the knowledge gained and the results achieved are worth far more than that effort.</p>
 <p>I hope I can convey these knowledge and enjoyment to you in an easy-to-understand way. For me, programming are just tools. That's why I prefer telling the core idea to providing the actual code.</p>
