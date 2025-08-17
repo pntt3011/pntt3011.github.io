@@ -23,42 +23,8 @@ Lately, my neighborhoods have started instailling surveillance cameras in their 
 <p>I had thought about being able to playback but soon ditched that idea. Serving those records might double the effort, whereas I actually don't need them at that moment. It should only be a nice-to-have feature, not a must-have, at least in the first version.</p>
 <h2>Available options</h2>
 <p>First, I want to check if there has been any adequate solutions before. Some apps run through my mind, but all of them comes with some downsides:</p>
-<table>
-<thead>
-<tr>
-<th></th>
-<th>Pros</th>
-<th>Cons</th>
-<th></th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Streaming platforms <br>(Youtube)</td>
-<td>- Easy to use<br>- Many configurations<br>- Error-free</td>
-<td>- External server<br>- Cannot access raw data</td>
-<td></td>
-</tr>
-<tr>
-<td>IPCam</td>
-<td>- Easy to use<br>- Many configurations<br>- Error-free (maybe)<br>- No external server</td>
-<td>- Cannot access raw data</td>
-<td></td>
-</tr>
-<tr>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td>The most painful objective seems to be able to access the raw data. That leaves me no choice but to program an app myself.</td>
-<td></td>
-<td></td>
-<td></td>
-</tr>
-</tbody>
-</table>
+<img class="image-box" loading="lazy" src="/media/Pasted_image_20250817222306.png" alt="" width="722" height="320" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/>
+<p>The most painful objective seems to be able to access the raw data. That leaves me no choice but to program an app myself.</p>
 <p><strong>Consider using IPCam on Google Play if you don't want to sink into the depressing hole of programming like me.</strong></p>
 <h2>Pipeline</h2>
 <p>After breaking down every steps, I have the following chart:</p>
@@ -86,84 +52,8 @@ In my case, thay are H264, H265, VP8, VP9 for video and AAC, Opus for audio. It'
 <p>If you are lazy, just pick whatever you want. But I need to use as least CPU as possible, so I will benchmark the utilisation for all of them.</p>
 <p>I ask ChatGPT to generate a demo app for me to record from camera and save output to a file. Then, I use the Profiler from Android Studio to monitor the CPU and RAM usage.</p>
 <p>The result is as follows. We only need to focus the CPU and RAM columns.</p>
-<table>
-<thead>
-<tr>
-<th></th>
-<th>Profile</th>
-<th>Level</th>
-<th>I-int</th>
-<th>Bitrate</th>
-<th>FPS</th>
-<th>CPU (%)</th>
-<th>RAM (MB)</th>
-<th>Size (MB)</th>
-<th>Time (s)</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>H264 + AAC</td>
-<td>8</td>
-<td>65536</td>
-<td>1</td>
-<td>2M</td>
-<td>24</td>
-<td>~30</td>
-<td>~150</td>
-<td>10.44</td>
-<td>30</td>
-</tr>
-<tr>
-<td>H265 + AAC</td>
-<td>1</td>
-<td>2097152</td>
-<td>1</td>
-<td>2M</td>
-<td>24</td>
-<td>~30</td>
-<td>~150</td>
-<td>8.9</td>
-<td>30</td>
-</tr>
-<tr>
-<td>VP8 + Opus</td>
-<td>1</td>
-<td>8</td>
-<td>1</td>
-<td>2M</td>
-<td>24</td>
-<td>~30</td>
-<td>~150</td>
-<td>7.5</td>
-<td>30</td>
-</tr>
-<tr>
-<td>VP9 + Opus</td>
-<td>1</td>
-<td>512</td>
-<td>1</td>
-<td>2M</td>
-<td>24</td>
-<td>~30</td>
-<td>~150</td>
-<td>7.5</td>
-<td>30</td>
-</tr>
-<tr>
-<td>Wait, let me explain, it seems I'm so lazy that I simply copy the result from one experiment. But it actually oscillates around that point, I swear. These encoders show no differences regarding performance on my phone, which makes it more difficult to reach a conclusion.</td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-</tr>
-</tbody>
-</table>
+<img class="image-box" loading="lazy" src="/media/Pasted_image_20250817222436.png" alt="" width="981" height="223" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/>
+<p>Wait, let me explain, it seems I'm so lazy that I simply copy the result from one experiment. But it actually oscillates around that point, I swear. These encoders show no differences regarding performance on my phone, which makes it more difficult to reach a conclusion.</p>
 <p>How about comparing using the file size?<br />
 In reality, I don't store the file and just send all frames on the fly so that doesn't matter.</p>
 <p><strong>In the end, I choose H265 + AAC cause I like its name. No logical rationale here.</strong></p>
@@ -172,8 +62,8 @@ In reality, I don't store the file and just send all frames on the fly so that d
 <p>Now there's another requirement: your friend need to arrange them in a certain order. For example, he want to bring old boxes first, so that he can give away them more easily later.</p>
 <p>You bring box A. Then you bring box B, which is more recent. But your friend hasn't pick box A yet. Where should you put the box B? In front of or behind box A?<br />
 Behind box A, right. Your friend can get box A more conveniently this way.</p>
-<p>This is indeed my case here. I need the frame in chronological order, cause it's &quot;live&quot; streaming and we live as time moves forward, obviously. That's why we need to write the captured frames sequentially to the buffer. And the encoders/packetizers should read them in that order. In computer science, this data structure is called &quot;a queue&quot;. You can search this term on Google (or ChatGPT) for more information or how to implement them.<br />
-<img class="image-box" loading="lazy" src="/media/Pasted_image_20250816154444.png" alt="" width="1024" height="341" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/></p>
+<p>This is indeed my case here. I need the frame in chronological order, cause it's &quot;live&quot; streaming and we live as time moves forward, obviously. That's why we need to write the captured frames sequentially to the buffer. And the encoders/packetizers should read them in that order. In computer science, this data structure is called &quot;a queue&quot;. You can search this term on Google (or ChatGPT) for more information or how to implement them.</p>
+<img class="image-box" loading="lazy" src="/media/Pasted_image_20250816154444.png" alt="" width="1024" height="341" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/>
 <h2>Should your friend wait there, or do something else and come back later?</h2>
 <p>Maybe your friend goes to the gym everyday, so he moves the boxes faster than you. While you're bringing a new box to the staircase, he's also standing there, staring at you awkwardly. Then his phones rang, he doesn't decide whether he should answer it or wait until everything is done.</p>
 <p>Both approaches have their own pros and cons. If he waits there, he can deliver the next box as soon as possible, but he misses the chances to do anything else. If he picks up the phone, he can help someone else by responsing them in time, but he might come back a little later.</p>
@@ -228,8 +118,8 @@ This ensures the packetizers always process and send the latest frame, furtherly
 That makes the buffer have size 2. One for keyframes and one for P-frames.</p>
 <h2>Let's measure the performance</h2>
 <p>I already make it work. Now's the time to measure the performance to see whether I can improve anything (hope not).</p>
-<p><img class="image-box" loading="lazy" src="/media/Pasted_image_20250728230843.png" alt="" width="429" height="80" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/><br />
-CPU usage is adequate, it's even lower than the encoder benchmark, perhaps because I don't write to file this time.</p>
+<img class="image-box" loading="lazy" src="/media/Pasted_image_20250728230843.png" alt="" width="429" height="80" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/>
+<p>CPU usage is adequate, it's even lower than the encoder benchmark, perhaps because I don't write to file this time.</p>
 <img class="image-box" loading="lazy" src="/media/Pasted_image_20250809161018.png" alt="" width="1023" height="118" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/>
 <p>The memory usage is not good though, garbage collector is triggered every 10 seconds. For those who don't know what is garbage collector is, just see it as the cleaner of your house. The more &quot;garbage&quot; (or memory) you use, the more often it has to work. This process is actually checking which memories are unused and &quot;forgeting&quot; them, so we can use that memory for other things later.<br />
 During the cleaning, you can't do anything, cause it can produce more &quot;garbage&quot;. This heavily impacts the performance so I should avoid it at all costs. Also, this indetermined behavior may cause some unforeseeable affects.</p>
@@ -257,8 +147,8 @@ As a result, I recommend switching to C/C++, an more low-level language, and avo
 I almost drop out of my chair this time.</p>
 <p>Let's calm down and debug. I don't want my hours of refactor to go wasted.<br />
 The culprit seems to be related to the recorder API, according to this <a href="https://github.com/android/camera-samples/issues/73">issue</a>. More shockingly, the frequent running of garbage collector helps solve the problem.</p>
-<p><img class="image-box" loading="lazy" src="/media/Pasted_image_20250731235434.png" alt="" width="1024" height="396" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/><br />
-Should I roll back now?<br />
+<img class="image-box" loading="lazy" src="/media/Pasted_image_20250731235434.png" alt="" width="1024" height="396" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/>
+<p>Should I roll back now?<br />
 Another solution is to migrate to the C/C++ Recording API too.<br />
 I decide to take this path, since I don't want to accept that my work is meaningless.</p>
 <p>After another few hours, finally, my effort has been paid off. I can't use enough words to describe this happiness. That feeling when I manually manage the memory is something Java/Kotlin cannot bring to me.</p>
@@ -271,8 +161,8 @@ Why am I asking this, this is a trivial matter. Who cares about it? Anyone will 
 What happen if none of us waits?<br />
 I know it's hard to imagine in the physical world. But thinking in digital view, your friend may pick a box that is half yours and half in the buffer.<br />
 Sound scary.</p>
-<p>That phenomenon is called &quot;race-condition&quot; in computer science.<br />
-<img class="image-box" loading="lazy" src="/media/Pasted_image_20250817210240.png" alt="" width="487" height="406" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/></p>
+<p>That phenomenon is called &quot;race-condition&quot; in computer science.</p>
+<img class="image-box" loading="lazy" src="/media/Pasted_image_20250817210240.png" alt="" width="487" height="406" style="max-width: 80%; max-height: 70vh; width: auto; height: auto; margin-left: auto; margin-right: auto;"/>
 <p>Wait, but I can just put the box there and my friend can pick 1 box only if the second box isn't &quot;completed&quot; yet, is that right?<br />
 You have notice the point. That why I don't mention this earlier, but postpone until now.<br />
 Because, now we have reused the buffer memory instead of creating a new one every time a box comes.<br />
@@ -317,7 +207,7 @@ You can read more about how it works in <a href="https://pntt3011.github.io/post
 <p>This project had been nurtured for a long time. I only got the chance to bring it to life now. There were more issues than I had expected, it also took longer time to develop as I needed to learn many new things along the way. However, the knowledge gained and the results achieved are worth far more than that effort.</p>
 <p>I hope I can convey these knowledge and enjoyment to you in an easy-to-understand way. For me, programming are just tools. That's why I prefer telling the core idea to providing the actual code.</p>
 <p>You can find the full code in this <a href="https://github.com/pntt3011/CameraRtsp">link</a>.</p>
-<p>Happy reading.</p>
+<p>Thanks for reading.</p>
 
 		</section>
 	
