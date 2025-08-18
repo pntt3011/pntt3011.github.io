@@ -1,8 +1,0 @@
-<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="32" cy="32" r="30" fill="#FFD93B" stroke="#000" stroke-width="2"/>
-  <!-- Eyes -->
-  <circle cx="22" cy="24" r="4" fill="#000"/>
-  <circle cx="42" cy="24" r="4" fill="#000"/>
-  <!-- Smile -->
-  <path d="M20,40 Q32,52 44,40" stroke="#000" stroke-width="3" fill="none" stroke-linecap="round"/>
-</svg>
