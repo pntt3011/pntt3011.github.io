@@ -64,11 +64,11 @@ If you don't trust them, you can setup your own middle man.</p>
 </ul>
 <p>One clever optimization from Syncthing team, they do not rescan the whole folder at once but randomly rescan each file at a given time window. That reduces the CPU workload magnificently.</p>
 <p>After scanning, all the information such as filename, modified date, size are stored in a hidden table (invisible by default).</p>
-<p>This should be enough, do you think?<br />
+<p>This should be enough, don't you think so?<br />
 I thought the same thing, but then astonished by the Syncthing team.<br />
 They take a step further by annotating which part of a file has changed. A file is split into multiple chunks. Then, each chunk is given an ID (you can search more about hashing).<br />
 When synching later, they just send the updated chunk over the Internet.</p>
-<p>Not only that, they also assign an version for each file.<br />
+<p>Not only that, they also assign a version for each file.<br />
 I questioned myself why they do that? Isn't modified time enough?<br />
 The answer lies in the next section: Comparing.</p>
 <h2>Comparing</h2>
@@ -78,8 +78,8 @@ This process is also started on every file changes, too.</p>
 Or more specifically, how do you know which files to delete, create or update?</p>
 <p>Given device A has file X and device B doesn't have it. How do Syncthing know that file is deleted or created?<br />
 They don't mention it in the documentation, but I think a deleted file is updated with the deleted time and size 0 in the table.</p>
-<p>How about rename? Does Syncthing know that it should rename instead of deleting and creating new file?<br />
-Honestly, I don't know. They don't mention this case either. But I believe they can handle this case, maybe add another column named &quot;old name&quot; to the table.</p>
+<p>How about rename? Does Syncthing know that it should rename instead of deleting and creating a new file?<br />
+Honestly, I don't know. They don't mention this case either. But I believe they handle this case efficiently, maybe add another column named &quot;old name&quot; to the scanning table.</p>
 <p>Now, let's proceed to the most interesting case: update.<br />
 Just compare the modified date, right. Where is the interesting part?<br />
 Consider this case, you have file X in both devices. You change that file on laptop. Then you fly to another country and your Android changes the time. You update that file on Android because you don't bring your laptop.<br />
@@ -87,7 +87,7 @@ Now you have finished your trip, go back to your home, open your laptop, wait fo
 Tada, the file on Android rolls back to the same as in laptop.</p>
 <p>Because you updated the file in another timezone, the modified time might not be suitable anymore.<br />
 That's why Syncthing performs versioning on each files, like mentioned in the previous section. This can be a number that is monotonic increase.</p>
-<p>When comparing, the versions of a file from all versions will be compared, then one global version is chosen (usually the largest one).</p>
+<p>When comparing, the versions of a file from all versions will be compared, then one global version is chosen (usually the highest one).</p>
 <p>If multiple global versions are found, like the example above, users must manually choose what version they want to keep (objecitve 2).</p>
 <p>At the end of the comparing process, all files are marked with respective global versions, along with their local versions. Then, synchronization happens.</p>
 <h2>Synchronization</h2>
