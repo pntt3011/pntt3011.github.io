@@ -128,16 +128,13 @@ During the cleaning, you can't do anything, cause it can produce more &quot;garb
 <p>Why isn't the avg process time affected?<br />
 That number is just the packetizing time. I log it because that's the only part I might be able to improve. The encoding and capturing are already handled by the OS itself, thus I can't interfere much.</p>
 <h2>Dealing with memory spiking</h2>
-<p>Let's go back to the delivery example above. This time, your friend hasn't package anything yet. He has rents 2 rooms in his building, one for living and one for storage. He asks you to help him bring things from his living room to the storage for easier packaging.</p>
-<p>Why don't we bring the cardboards to the living room instead? Isn't it more efficient?<br />
-He has his own reasons. We shouldn't ask much :)<br />
-There are many unreasonable things in our life. Let's accept his situation for the time being.</p>
+<p>Let's go back to the delivery example above. This time, your friend wanted to discard some old stuff. The building has a dedicated donation room for that purpose. Other residents or the landlord can adopt anything they find useful. Hence, he asks you to help him bring things from his room to that room.</p>
 <p>Your friend also tells you that he has several obsolete big baskets in the room in case you need. How will you use those baskets?<br />
-Put some items into one basket, carry it to the storage, set out all items, then:<br />
-Bring the basket back to the living room.<br />
+Put some items into one basket, carry it to the destination, set out all items, then:<br />
+Bring the basket back to the room.<br />
 Or<br />
-Leave the basket there, go back to the living room and use a new one.<br />
-Personally, I'll take option 1. Option 2 can run out of baskets so we must bring them back to the living room and reuse them anyway. This detour takes us some time and it's troublesome.</p>
+Leave the basket there, go back to the room and use a new one.<br />
+Personally, I'll take option 1. Option 2 can run out of baskets so we must bring them back to your friend's room and reuse them anyway. This detour takes us some time and it's troublesome.</p>
 <p>Wait a second, option 2 appears very similar to garbage collector, right?<br />
 You run out of memory/baskets, then you/the garbage collector free the unused ones to reuse them.<br />
 The take away is: <strong>reusing the memory as much as possible.</strong></p>
