@@ -1,5 +1,15 @@
 [
     {
+        "id": "20250825160321",
+        "title": "Artificial consciousness",
+        "creation_time": 1756112601,
+        "tags": [
+            "consciousness",
+            "AI"
+        ],
+        "preview": "My thinking process on what we need to truly achieve artificial consciousness. This post walks through multiple AI algorithms and discusses their shortcomings. By the end, I propose a promising approach that may hold the key humans are looking for."
+    },
+    {
         "id": "20250817222918",
         "title": "Android camera streaming",
         "creation_time": 1755444558,

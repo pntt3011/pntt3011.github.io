@@ -1,10 +1,18 @@
 [
     {
         "tag": "all",
-        "count": 3
+        "count": 4
+    },
+    {
+        "tag": "AI",
+        "count": 1
     },
     {
         "tag": "Android",
+        "count": 1
+    },
+    {
+        "tag": "consciousness",
         "count": 1
     },
     {
