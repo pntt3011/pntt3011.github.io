@@ -2,145 +2,142 @@
 <html lang="en">
 
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Steel Cutter Calculator</title>
-  <meta name="description" content="Steel cutting stock optimizer — select box dimensions, add components, and compute the optimal cut plan." />
-  <link rel="stylesheet" href="./styles.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Steel Cutter Calculator</title>
+    <meta name="description"
+        content="Steel cutting stock optimizer — select box dimensions, add components, and compute the optimal cut plan." />
+    <link rel="stylesheet" href="./styles.css" />
 </head>
 
 <body>
-  <main class="app-shell">
+    <main class="app-shell">
 
-    <!-- ── Header ── -->
-    <header class="topbar">
-      <h1>Steel Cutter Calculator</h1>
-      <div class="hero-meta">
-        <span id="datasetStatus" class="status-pill status-pill--loading">Loading…</span>
-        <span id="matchCount" class="meta-line">0 matching components</span>
-      </div>
-    </header>
+        <!-- ── Header ── -->
+        <header class="topbar">
+            <h1>Steel Cutter Calculator</h1>
+            <div class="hero-meta">
+                <span id="datasetStatus" class="status-pill status-pill--loading">Loading…</span>
+                <span id="matchCount" class="meta-line">0 matching components</span>
+            </div>
+        </header>
 
-    <!-- ── Material ── -->
-    <section class="card section-material">
-      <h2 class="section-title">Material</h2>
-      <div class="material-row">
-        <label>
-          <span>Box length</span>
-          <select id="lengthOfBoxCm"></select>
-        </label>
-        <label>
-          <span>Box width</span>
-          <select id="widthOfBoxCm"></select>
-        </label>
-        <label>
-          <span>Stock length</span>
-          <input id="materialLengthCm" type="number" min="1" step="1" placeholder="6000" />
-        </label>
-      </div>
-    </section>
+        <!-- ── Material ── -->
+        <section class="card section-material">
+            <h2 class="section-title">Material</h2>
+            <div class="material-row">
+                <label>
+                    <span>Box length</span>
+                    <select id="lengthOfBoxCm"></select>
+                </label>
+                <label>
+                    <span>Box width</span>
+                    <select id="widthOfBoxCm"></select>
+                </label>
+                <label>
+                    <span>Stock length</span>
+                    <input id="materialLengthCm" type="number" min="1" step="1" placeholder="6000" />
+                </label>
+            </div>
+        </section>
 
-    <!-- ── Components ── -->
-    <section class="card section-components">
-      <h2 class="section-title">Components</h2>
+        <!-- ── Components ── -->
+        <section class="card section-components">
+            <h2 class="section-title">Components</h2>
 
-      <!-- Inline cut list table (add row lives in tfoot) -->
-      <div class="table-wrap">
-        <table class="data-table" id="componentsTable">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Order</th>
-              <th>Component</th>
-              <th>Part</th>
-              <th>Length (cm)</th>
-              <th>QTY</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="selectedListBody"></tbody>
-          <tfoot>
-            <tr class="add-row" id="addRow">
-              <td class="add-icon-cell">
-                <button id="addComponentButton" type="button" class="add-btn" title="Add component" disabled>
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                    <line x1="8" y1="2" x2="8" y2="14"/><line x1="2" y1="8" x2="14" y2="8"/>
-                  </svg>
+            <!-- Inline cut list table (add row lives in tfoot) -->
+            <div class="table-wrap">
+                <table class="data-table" id="componentsTable">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Order</th>
+                            <th>Component</th>
+                            <th>Part</th>
+                            <th>Length (cm)</th>
+                            <th>QTY</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="selectedListBody"></tbody>
+                    <tfoot>
+                        <tr class="add-row" id="addRow">
+                            <td></td>
+                            <td>
+                                <select id="orderSelect" class="inline-select">
+                                    <option value="">Order…</option>
+                                </select>
+                            </td>
+                            <td>
+                                <select id="parentSelect" class="inline-select" disabled>
+                                    <option value="">Component…</option>
+                                </select>
+                            </td>
+                            <td>
+                                <select id="componentSelect" class="inline-select" disabled>
+                                    <option value="">Part…</option>
+                                </select>
+                            </td>
+                            <td><span id="addRowLength" class="add-row-preview">—</span></td>
+                            <td><span id="addRowQty" class="add-row-preview">—</span></td>
+                            <td>
+                                <button id="resetSelectionButton" type="button" class="clear-btn"
+                                    title="Clear selection">✕</button>
+                            </td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+
+            <!-- Calculate button inside Components card -->
+            <div class="components-footer">
+                <button id="calculateButton" type="button" class="primary-button calculate-btn" disabled>
+                    Calculate
                 </button>
-              </td>
-              <td>
-                <select id="orderSelect" class="inline-select">
-                  <option value="">Order…</option>
-                </select>
-              </td>
-              <td>
-                <select id="parentSelect" class="inline-select" disabled>
-                  <option value="">Component…</option>
-                </select>
-              </td>
-              <td>
-                <select id="componentSelect" class="inline-select" disabled>
-                  <option value="">Part…</option>
-                </select>
-              </td>
-              <td><span id="addRowLength" class="add-row-preview">—</span></td>
-              <td><span id="addRowQty" class="add-row-preview">—</span></td>
-              <td>
-                <button id="resetSelectionButton" type="button" class="clear-btn" title="Clear selection">✕</button>
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
+            </div>
+        </section>
 
-      <!-- Calculate button inside Components card -->
-      <div class="components-footer">
-        <button id="calculateButton" type="button" class="primary-button calculate-btn" disabled>
-          Calculate
-        </button>
-      </div>
-    </section>
+        <!-- ── Results ── -->
+        <section class="card section-results" id="resultsSection">
+            <h2 class="section-title">Results</h2>
+            <p id="resultSummary" class="result-summary meta-line">Run the optimizer to see results.</p>
+            <div id="resultList" class="results-grid"></div>
+        </section>
 
-    <!-- ── Results ── -->
-    <section class="card section-results" id="resultsSection">
-      <h2 class="section-title">Results</h2>
-      <p id="resultSummary" class="result-summary meta-line">Run the optimizer to see results.</p>
-      <div id="resultList" class="results-grid"></div>
-    </section>
+    </main>
 
-  </main>
+    <!-- Template: one row in the cut-list table -->
+    <template id="selectedRowTemplate">
+        <tr>
+            <td class="row-num-cell"></td>
+            <td class="order-cell"></td>
+            <td class="component-cell"></td>
+            <td class="part-cell"></td>
+            <td class="length-cell"></td>
+            <td>
+                <input class="qty-input" type="number" min="1" step="1" />
+            </td>
+            <td class="remove-cell">
+                <button type="button" class="remove-btn" aria-label="Remove row" title="Remove">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2"
+                        stroke-linecap="round">
+                        <line x1="3" y1="8" x2="13" y2="8" />
+                    </svg>
+                </button>
+            </td>
+        </tr>
+    </template>
 
-  <!-- Template: one row in the cut-list table -->
-  <template id="selectedRowTemplate">
-    <tr>
-      <td class="row-num-cell"></td>
-      <td class="order-cell"></td>
-      <td class="component-cell"></td>
-      <td class="part-cell"></td>
-      <td class="length-cell"></td>
-      <td>
-        <input class="qty-input" type="number" min="1" step="1" />
-      </td>
-      <td class="remove-cell">
-        <button type="button" class="remove-btn" aria-label="Remove row" title="Remove">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-            <line x1="3" y1="8" x2="13" y2="8"/>
-          </svg>
-        </button>
-      </td>
-    </tr>
-  </template>
+    <!-- Template: one result card -->
+    <template id="resultCardTemplate">
+        <div class="result-card">
+            <h3></h3>
+            <p class="result-meta"></p>
+            <ul class="pattern-list"></ul>
+        </div>
+    </template>
 
-  <!-- Template: one result card -->
-  <template id="resultCardTemplate">
-    <div class="result-card">
-      <h3></h3>
-      <p class="result-meta"></p>
-      <ul class="pattern-list"></ul>
-    </div>
-  </template>
-
-  <script type="module" src="./app.js"></script>
+    <script type="module" src="./app.js"></script>
 </body>
 
 </html>

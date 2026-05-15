@@ -78,9 +78,12 @@ function bindEvents() {
         syncPreview();
     });
 
-    // Part select → update preview + enable + button (no auto-add)
+    // Part select → add immediately
     elements.componentSelect.addEventListener("change", () => {
         syncPreview();
+        if (elements.componentSelect.value) {
+            addSelectedComponent();
+        }
     });
 
     // ➕ button → commit row
@@ -124,20 +127,24 @@ function refreshSelectors() {
     const length = numberValue(elements.lengthOfBoxCm);
     const width = numberValue(elements.widthOfBoxCm);
 
+    // Length always shows all options from records
+    const allLengths = unique(state.records.map(r => Number(r.lengthOfBoxCm)));
+    setOptions(elements.lengthOfBoxCm, allLengths.map(v => option(String(v), String(v))));
+    if (length != null && allLengths.includes(length)) elements.lengthOfBoxCm.value = String(length);
+
+    // Width is filtered by selected length
     if (length != null) {
         const availableWidths = unique(
             state.records.filter(r => Number(r.lengthOfBoxCm) === length).map(r => Number(r.widthOfBoxCm))
         );
         setOptions(elements.widthOfBoxCm, availableWidths.map(v => option(String(v), String(v))));
-        if (availableWidths.includes(width)) elements.widthOfBoxCm.value = String(width);
-    }
-
-    if (width != null) {
-        const availableLengths = unique(
-            state.records.filter(r => Number(r.widthOfBoxCm) === width).map(r => Number(r.lengthOfBoxCm))
-        );
-        setOptions(elements.lengthOfBoxCm, availableLengths.map(v => option(String(v), String(v))));
-        if (availableLengths.includes(length)) elements.lengthOfBoxCm.value = String(length);
+        
+        // Preserve selected width if still valid, otherwise default to first available
+        if (width != null && availableWidths.includes(width)) {
+            elements.widthOfBoxCm.value = String(width);
+        } else if (availableWidths.length > 0) {
+            elements.widthOfBoxCm.value = String(availableWidths[0]);
+        }
     }
 
     // Recompute filtered records
@@ -275,10 +282,8 @@ function addSelectedComponent() {
     renderSelectedRows();
     updateCalculateState();
 
-    // Reset the Part picker so user can immediately add another
-    elements.componentSelect.value = "";
-    setOptions(elements.componentSelect, [option("Part…", "")], true);
-    syncPreview();
+    // Auto-reset picker so user can start next selection immediately
+    resetPicker();
 }
 
 function highlightRow(key) {
