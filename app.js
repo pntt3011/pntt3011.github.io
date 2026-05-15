@@ -53,8 +53,8 @@ async function loadWasm() {
 }
 
 function bindEvents() {
-    [elements.lengthOfBoxCm, elements.widthOfBoxCm].forEach((input) => {
-        input.addEventListener("input", () => {
+    [elements.lengthOfBoxCm, elements.widthOfBoxCm].forEach((el) => {
+        el.addEventListener("change", () => {
             refreshSelectors();
             updateCalculateState();
         });
@@ -89,6 +89,13 @@ async function loadData() {
     if (!Array.isArray(state.records)) {
         throw new Error("cutting_components.json must contain an array");
     }
+    // Populate box-length and box-width selects from available data
+    const lengths = Array.from(new Set(state.records.map(r => Number(r.lengthOfBoxCm)).filter(n => Number.isFinite(n)))).sort((a, b) => a - b);
+    const widths = Array.from(new Set(state.records.map(r => Number(r.widthOfBoxCm)).filter(n => Number.isFinite(n)))).sort((a, b) => a - b);
+    const lengthOptions = [option('Choose length', ''), ...lengths.map(v => option(String(v), String(v)))];
+    const widthOptions = [option('Choose width', ''), ...widths.map(v => option(String(v), String(v)))];
+    setOptions(elements.lengthOfBoxCm, lengthOptions, lengths.length === 0);
+    setOptions(elements.widthOfBoxCm, widthOptions, widths.length === 0);
 }
 
 
@@ -99,7 +106,9 @@ function setStatus(kind, text) {
 }
 
 function numberValue(input) {
-    const value = Number(input.value);
+    const raw = input.value;
+    if (raw === null || raw === undefined || raw === "") return null;
+    const value = Number(raw);
     return Number.isFinite(value) ? value : null;
 }
 
@@ -112,6 +121,34 @@ function getBoxKey() {
 
 function refreshSelectors() {
     const { length, width } = getBoxKey();
+
+    // Cascade selects: if one side selected, restrict the other to available values
+    if (length != null) {
+        const widths = Array.from(new Set(state.records.filter(r => Number(r.lengthOfBoxCm) === length).map(r => Number(r.widthOfBoxCm)))).sort((a, b) => a - b);
+        const widthOptions = [option('Choose width', ''), ...widths.map(v => option(String(v), String(v)))];
+        setOptions(elements.widthOfBoxCm, widthOptions, widths.length === 0);
+        if (width != null && !widths.includes(width)) {
+            elements.widthOfBoxCm.value = "";
+        }
+        // Auto-select the only remaining width
+        if ((width == null) && widths.length === 1) {
+            elements.widthOfBoxCm.value = String(widths[0]);
+        }
+    }
+
+    if (width != null) {
+        const lengths = Array.from(new Set(state.records.filter(r => Number(r.widthOfBoxCm) === width).map(r => Number(r.lengthOfBoxCm)))).sort((a, b) => a - b);
+        const lengthOptions = [option('Choose length', ''), ...lengths.map(v => option(String(v), String(v)))];
+        setOptions(elements.lengthOfBoxCm, lengthOptions, lengths.length === 0);
+        if (length != null && !lengths.includes(length)) {
+            elements.lengthOfBoxCm.value = "";
+        }
+        // Auto-select the only remaining length
+        if ((length == null) && lengths.length === 1) {
+            elements.lengthOfBoxCm.value = String(lengths[0]);
+        }
+    }
+
     if (length == null || width == null) {
         state.filteredRecords = [];
         resetPickerOptions();
@@ -188,7 +225,7 @@ function syncComponents() {
 function syncPreview() {
     const record = getSelectedRecord();
     if (!record) {
-        elements.componentPreview.innerHTML = "<p>Select a component to preview its length and default quantity.</p>";
+        elements.componentPreview.innerHTML = "<p>Pick a component.</p>";
         elements.addComponentButton.disabled = true;
         return;
     }
@@ -308,7 +345,7 @@ async function calculate() {
 
 function renderResults(result, stockLength = 0) {
     if (!result || !Array.isArray(result.patterns) || result.patterns.length === 0) {
-        elements.resultList.innerHTML = '<p class="meta-line">Run Calculate to see cutting patterns.</p>';
+        elements.resultList.innerHTML = '<p class="meta-line">No result.</p>';
         return;
     }
 

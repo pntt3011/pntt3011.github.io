@@ -10,57 +10,54 @@
 
 <body>
     <main class="app-shell">
-        <section class="hero card">
-            <div>
-                <p class="eyebrow">Static GitHub Pages app</p>
-                <h1>Cutting stock optimizer</h1>
-                <p class="lede">
-                    Filter components from the source data, edit quantities, and generate cutting patterns with a
-                    WebAssembly-backed scorer.
-                </p>
-            </div>
+        <header class="topbar">
+            <h1>Cutting stock optimizer</h1>
             <div class="hero-meta">
-                <span id="datasetStatus" class="status-pill status-pill--loading">Loading data</span>
-                <span id="matchCount" class="meta-line">0 matching components</span>
+                <span id="datasetStatus" class="status-pill status-pill--loading">Loading</span>
+                <span id="matchCount" class="meta-line">0 matches</span>
             </div>
-        </section>
+        </header>
 
         <section class="grid">
             <section class="card">
-                <h2>1. Stock setup</h2>
+                <h2>Setup</h2>
                 <div class="form-grid">
                     <label>
-                        <span>lengthOfBoxCm</span>
-                        <input id="lengthOfBoxCm" type="number" min="0" step="1" placeholder="14" />
+                        <span>Box length</span>
+                        <select id="lengthOfBoxCm">
+                            <option value="">Choose length</option>
+                        </select>
                     </label>
                     <label>
-                        <span>widthOfBoxCm</span>
-                        <input id="widthOfBoxCm" type="number" min="0" step="1" placeholder="14" />
+                        <span>Box width</span>
+                        <select id="widthOfBoxCm">
+                            <option value="">Choose width</option>
+                        </select>
                     </label>
                     <label>
-                        <span>length of material</span>
+                        <span>Stock length</span>
                         <input id="materialLengthCm" type="number" min="1" step="1" placeholder="6000" />
                     </label>
                 </div>
             </section>
 
             <section class="card">
-                <h2>2. Component picker</h2>
+                <h2>Components</h2>
                 <div class="picker-grid">
                     <label>
-                        <span>order_name</span>
+                        <span>Order</span>
                         <select id="orderSelect">
                             <option value="">Choose an order</option>
                         </select>
                     </label>
                     <label>
-                        <span>parent_component_name</span>
+                        <span>Parent</span>
                         <select id="parentSelect" disabled>
                             <option value="">Choose a parent component</option>
                         </select>
                     </label>
                     <label>
-                        <span>component_name</span>
+                        <span>Component</span>
                         <select id="componentSelect" disabled>
                             <option value="">Choose a component</option>
                         </select>
@@ -68,29 +65,26 @@
                 </div>
 
                 <div class="component-preview" id="componentPreview">
-                    <p>Select a component to preview its length and default quantity.</p>
+                    <p>Pick a component.</p>
                 </div>
 
                 <div class="actions-row">
-                    <button id="addComponentButton" type="button" class="primary-button" disabled>Add component</button>
-                    <button id="resetSelectionButton" type="button" class="secondary-button">Clear selection</button>
+                    <button id="addComponentButton" type="button" class="primary-button" disabled>Add</button>
+                    <button id="resetSelectionButton" type="button" class="secondary-button">Reset</button>
                 </div>
             </section>
         </section>
 
         <section class="card">
-            <div class="section-header">
-                <h2>3. Selected cut list</h2>
-                <p>Edit qty_needed before running the optimizer.</p>
-            </div>
+            <h2>Selected cut list</h2>
             <div class="table-wrap">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>order_name</th>
-                            <th>parent_component_name</th>
-                            <th>component_name</th>
-                            <th>length_of_detail</th>
+                            <th>Order</th>
+                            <th>Parent</th>
+                            <th>Component</th>
+                            <th>Length</th>
                             <th>qty</th>
                             <th></th>
                         </tr>
@@ -104,19 +98,13 @@
             </div>
         </section>
 
-        <section class="card footer-card">
-            <div>
-                <h2>4. Optimize</h2>
-                <p>Run the wasm optimizer and let it recommend the stock quantity from the selected cut list.</p>
-            </div>
-            <button id="calculateButton" type="button" class="primary-button" disabled>Calculate</button>
+        <section class="card footer-card compact-footer">
+            <button id="calculateButton" type="button" class="primary-button" disabled>Optimize</button>
         </section>
 
         <section class="card">
-            <div class="section-header">
-                <h2>5. Results</h2>
-                <p id="resultSummary">No optimization has been run yet.</p>
-            </div>
+            <h2>Result</h2>
+            <p id="resultSummary" class="result-summary">No result.</p>
             <div id="resultList" class="results-grid"></div>
         </section>
     </main>
