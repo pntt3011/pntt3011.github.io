@@ -387,6 +387,19 @@ function renderResults(result, stockLength = 0) {
 
     fragment.querySelector("h3").textContent = result.used_fallback ? "Recommended plan (fallback)" : "Recommended plan";
 
+    // Summary calculation
+    let totalBars = 0;
+    let totalWaste = 0;
+    for (const p of result.patterns) {
+        totalBars += p.qty;
+        totalWaste += (p.qty * p.waste);
+    }
+
+    const meta = fragment.querySelector(".result-meta");
+    meta.innerHTML = `
+        <strong>${totalBars}</strong> bars used &nbsp;·&nbsp; 
+        <strong>${totalWaste}</strong> mm waste &nbsp;·&nbsp; 
+    `;
 
     const list = fragment.querySelector(".pattern-list");
     let patternIndex = 1;
