@@ -369,9 +369,43 @@ select:disabled { opacity: 0.5; cursor: not-allowed; background: #f1f5f9; }
 .result-card h3 { font-size: 0.95rem; margin-bottom: 4px; }
 .result-meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 10px; }
 
-.pattern-list { padding-left: 18px; display: grid; gap: 8px; }
-.pattern-list li { font-size: 0.88rem; }
-.pattern-line { display: block; color: var(--muted); font-size: 0.82rem; }
+.pattern-list { list-style: none; display: grid; gap: 16px; padding: 0; }
+.pattern-group {
+  padding: 16px;
+  background: #fff;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 12px;
+}
+.pattern-header { display: flex; justify-content: space-between; align-items: center; }
+.pattern-header strong { font-size: 1rem; color: var(--accent); }
+.pattern-qty { font-weight: 700; color: var(--text); background: var(--accent-muted); padding: 2px 8px; border-radius: 6px; font-size: 0.85rem; }
+
+.pattern-sublist { list-style: none; padding: 0; display: grid; gap: 6px; }
+.pattern-sublist li {
+  padding-left: 14px;
+  position: relative;
+  font-size: 0.9rem;
+}
+.pattern-sublist li::before {
+  content: "·";
+  position: absolute;
+  left: 0;
+  font-weight: 900;
+  color: var(--accent);
+}
+
+.pattern-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px dashed var(--card-border);
+  font-size: 0.82rem;
+}
+.waste-tag { color: var(--danger); font-weight: 600; }
+.usage-tag { color: var(--muted); }
 
 /* ── Responsive ── */
 @media (max-width: 768px) {

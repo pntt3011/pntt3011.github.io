@@ -20,23 +20,22 @@ const DATA_URL = "./data/cutting_components.json";
 async function boot() {
     // 1. Initialize elements (only after DOM is ready)
     elements = {
-        datasetStatus:        document.getElementById("datasetStatus"),
-        matchCount:           document.getElementById("matchCount"),
-        lengthOfBoxCm:        document.getElementById("lengthOfBoxCm"),
-        widthOfBoxCm:         document.getElementById("widthOfBoxCm"),
-        materialLengthCm:     document.getElementById("materialLengthCm"),
-        orderSelect:          document.getElementById("orderSelect"),
-        parentSelect:         document.getElementById("parentSelect"),
-        componentSelect:      document.getElementById("componentSelect"),
+        datasetStatus: document.getElementById("datasetStatus"),
+        matchCount: document.getElementById("matchCount"),
+        lengthOfBoxCm: document.getElementById("lengthOfBoxCm"),
+        widthOfBoxCm: document.getElementById("widthOfBoxCm"),
+        materialLengthCm: document.getElementById("materialLengthCm"),
+        orderSelect: document.getElementById("orderSelect"),
+        parentSelect: document.getElementById("parentSelect"),
+        componentSelect: document.getElementById("componentSelect"),
         resetSelectionButton: document.getElementById("resetSelectionButton"),
-        addRowLength:         document.getElementById("addRowLength"),
-        addRowQty:            document.getElementById("addRowQty"),
-        selectedListBody:     document.getElementById("selectedListBody"),
-        calculateButton:      document.getElementById("calculateButton"),
-        resultSummary:        document.getElementById("resultSummary"),
-        resultList:           document.getElementById("resultList"),
-        selectedRowTemplate:  document.getElementById("selectedRowTemplate"),
-        resultCardTemplate:   document.getElementById("resultCardTemplate"),
+        addRowLength: document.getElementById("addRowLength"),
+        addRowQty: document.getElementById("addRowQty"),
+        selectedListBody: document.getElementById("selectedListBody"),
+        calculateButton: document.getElementById("calculateButton"),
+        resultList: document.getElementById("resultList"),
+        selectedRowTemplate: document.getElementById("selectedRowTemplate"),
+        resultCardTemplate: document.getElementById("resultCardTemplate"),
     };
 
     // 2. Run app initialization
@@ -371,12 +370,7 @@ async function calculate() {
     }));
 
     const result = state.computeCuttingPlan(items, stockLength, MAX_PRIMARY_PATTERNS);
-    const summaryQty = result?.stock_qty ?? 0;
-    const wastePct = Number.isFinite(result?.percentage_wasted) ? result.percentage_wasted : 0;
 
-    elements.resultSummary.textContent = summaryQty > 0
-        ? `Recommended stock qty: ${summaryQty} bars · ${wastePct.toFixed(2)}% wasted${result.used_fallback ? " · fallback used" : ""}.`
-        : "No stock bars were required for the selected components.";
 
     renderResults(result, stockLength);
 }
@@ -392,27 +386,42 @@ function renderResults(result, stockLength = 0) {
     const fragment = elements.resultCardTemplate.content.cloneNode(true);
 
     fragment.querySelector("h3").textContent = result.used_fallback ? "Recommended plan (fallback)" : "Recommended plan";
-    fragment.querySelector(".result-meta").textContent = `${result.stock_qty} bars · ${result.percentage_wasted.toFixed(2)}% wasted`;
+
 
     const list = fragment.querySelector(".pattern-list");
+    let patternIndex = 1;
+
     for (const pattern of result.patterns) {
         const item = document.createElement("li");
-        const main = document.createElement("strong");
+        item.className = "pattern-group";
 
-        // Group identical cuts for cleaner display (e.g., 368x2 instead of 368 + 368)
+        // Pattern Header: "Pattern 1 × 198"
+        const header = document.createElement("div");
+        header.className = "pattern-header";
+        header.innerHTML = `<strong>Pattern ${patternIndex++}</strong> <span class="pattern-qty">× ${pattern.qty}</span>`;
+        item.appendChild(header);
+
+        // Group components in this pattern by label
         const counts = {};
-        pattern.cuts.forEach(c => counts[c] = (counts[c] || 0) + 1);
-        const groupedStr = Object.keys(counts)
-            .map(Number)
-            .sort((a, b) => b - a)
-            .map(val => counts[val] > 1 ? `${val} × ${counts[val]}` : `${val}`)
-            .join(" + ");
+        pattern.cuts.forEach(label => counts[label] = (counts[label] || 0) + 1);
 
-        main.textContent = `${groupedStr} · ×${pattern.qty} · waste ${pattern.waste} mm`;
-        const detail = document.createElement("span");
-        detail.className = "pattern-line";
-        detail.textContent = `Used ${pattern.used_length} mm of ${stockLength} mm${pattern.is_fallback ? " · fallback" : ""}`;
-        item.append(main, detail);
+        const subList = document.createElement("ul");
+        subList.className = "pattern-sublist";
+        Object.keys(counts).forEach(label => {
+            const li = document.createElement("li");
+            li.textContent = `${label} × ${counts[label]}`;
+            subList.appendChild(li);
+        });
+        item.appendChild(subList);
+
+        // Footer: Waste and Length info
+        const footer = document.createElement("div");
+        footer.className = "pattern-footer";
+        footer.innerHTML = `
+            <span class="waste-tag">waste ${pattern.waste} mm of ${stockLength} mm</span>
+        `;
+        item.appendChild(footer);
+
         list.appendChild(item);
     }
 

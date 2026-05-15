@@ -525,7 +525,7 @@ fn insert_pattern(
 
             for (i, count) in candidate.counts.iter().enumerate() {
                 for _ in 0..*count {
-                    cuts.push(format!("{}({})", items[i].label, items[i].length));
+                    cuts.push(format!("{} ({})", items[i].label, items[i].length));
                 }
             }
 
