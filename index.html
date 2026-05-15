@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cutting Stock Optimizer</title>
+    <link rel="stylesheet" href="./styles.css" />
+</head>
+
+<body>
+    <main class="app-shell">
+        <section class="hero card">
+            <div>
+                <p class="eyebrow">Static GitHub Pages app</p>
+                <h1>Cutting stock optimizer</h1>
+                <p class="lede">
+                    Filter components from the source data, edit quantities, and generate cutting patterns with a
+                    WebAssembly-backed scorer.
+                </p>
+            </div>
+            <div class="hero-meta">
+                <span id="datasetStatus" class="status-pill status-pill--loading">Loading data</span>
+                <span id="matchCount" class="meta-line">0 matching components</span>
+            </div>
+        </section>
+
+        <section class="grid">
+            <section class="card">
+                <h2>1. Stock setup</h2>
+                <div class="form-grid">
+                    <label>
+                        <span>lengthOfBoxCm</span>
+                        <input id="lengthOfBoxCm" type="number" min="0" step="1" placeholder="14" />
+                    </label>
+                    <label>
+                        <span>widthOfBoxCm</span>
+                        <input id="widthOfBoxCm" type="number" min="0" step="1" placeholder="14" />
+                    </label>
+                    <label>
+                        <span>length of material</span>
+                        <input id="materialLengthCm" type="number" min="1" step="1" placeholder="6000" />
+                    </label>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>2. Component picker</h2>
+                <div class="picker-grid">
+                    <label>
+                        <span>order_name</span>
+                        <select id="orderSelect">
+                            <option value="">Choose an order</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>parent_component_name</span>
+                        <select id="parentSelect" disabled>
+                            <option value="">Choose a parent component</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>component_name</span>
+                        <select id="componentSelect" disabled>
+                            <option value="">Choose a component</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div class="component-preview" id="componentPreview">
+                    <p>Select a component to preview its length and default quantity.</p>
+                </div>
+
+                <div class="actions-row">
+                    <button id="addComponentButton" type="button" class="primary-button" disabled>Add component</button>
+                    <button id="resetSelectionButton" type="button" class="secondary-button">Clear selection</button>
+                </div>
+            </section>
+        </section>
+
+        <section class="card">
+            <div class="section-header">
+                <h2>3. Selected cut list</h2>
+                <p>Edit qty_needed before running the optimizer.</p>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>order_name</th>
+                            <th>parent_component_name</th>
+                            <th>component_name</th>
+                            <th>length_of_detail</th>
+                            <th>qty</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="selectedListBody">
+                        <tr class="empty-row">
+                            <td colspan="6">No components selected.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="card footer-card">
+            <div>
+                <h2>4. Optimize</h2>
+                <p>Run the wasm optimizer and let it recommend the stock quantity from the selected cut list.</p>
+            </div>
+            <button id="calculateButton" type="button" class="primary-button" disabled>Calculate</button>
+        </section>
+
+        <section class="card">
+            <div class="section-header">
+                <h2>5. Results</h2>
+                <p id="resultSummary">No optimization has been run yet.</p>
+            </div>
+            <div id="resultList" class="results-grid"></div>
+        </section>
+    </main>
+
+    <template id="selectedRowTemplate">
+        <tr>
+            <td class="order-cell"></td>
+            <td class="parent-cell"></td>
+            <td class="component-cell"></td>
+            <td class="length-cell"></td>
+            <td>
+                <input class="qty-input" type="number" min="1" step="1" />
+            </td>
+            <td>
+                <button type="button" class="icon-button remove-button">Remove</button>
+            </td>
+        </tr>
+    </template>
+
+    <template id="resultCardTemplate">
+        <article class="result-card">
+            <header>
+                <h3></h3>
+                <p class="result-meta"></p>
+            </header>
+            <ul class="pattern-list"></ul>
+        </article>
+    </template>
+
+    <script type="module" src="./app.js"></script>
+</body>
+
+</html>
