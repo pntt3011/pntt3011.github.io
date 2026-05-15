@@ -77,6 +77,11 @@ function bindEvents() {
     // Material selects
     [elements.lengthOfBoxCm, elements.widthOfBoxCm].forEach((el) => {
         el.addEventListener("change", () => {
+            // Clear current list and results when dimensions change
+            state.selectedRows = [];
+            renderSelectedRows();
+            renderResults([]);
+
             refreshSelectors();
             updateCalculateState();
         });
@@ -393,7 +398,17 @@ function renderResults(result, stockLength = 0) {
     for (const pattern of result.patterns) {
         const item = document.createElement("li");
         const main = document.createElement("strong");
-        main.textContent = `${pattern.cuts.join(" + ")} × ${pattern.qty} · waste ${pattern.waste} mm`;
+
+        // Group identical cuts for cleaner display (e.g., 368x2 instead of 368 + 368)
+        const counts = {};
+        pattern.cuts.forEach(c => counts[c] = (counts[c] || 0) + 1);
+        const groupedStr = Object.keys(counts)
+            .map(Number)
+            .sort((a, b) => b - a)
+            .map(val => counts[val] > 1 ? `${val} × ${counts[val]}` : `${val}`)
+            .join(" + ");
+
+        main.textContent = `${groupedStr} · ×${pattern.qty} · waste ${pattern.waste} mm`;
         const detail = document.createElement("span");
         detail.className = "pattern-line";
         detail.textContent = `Used ${pattern.used_length} mm of ${stockLength} mm${pattern.is_fallback ? " · fallback" : ""}`;
