@@ -12,7 +12,6 @@ const elements = {
     orderSelect: document.getElementById("orderSelect"),
     parentSelect: document.getElementById("parentSelect"),
     componentSelect: document.getElementById("componentSelect"),
-    addComponentButton: document.getElementById("addComponentButton"),
     resetSelectionButton: document.getElementById("resetSelectionButton"),
     addRowLength: document.getElementById("addRowLength"),
     addRowQty: document.getElementById("addRowQty"),
@@ -86,8 +85,7 @@ function bindEvents() {
         }
     });
 
-    // ➕ button → commit row
-    elements.addComponentButton.addEventListener("click", addSelectedComponent);
+
 
     // Reset picker
     elements.resetSelectionButton.addEventListener("click", () => {
@@ -228,12 +226,10 @@ function syncPreview() {
     if (!record) {
         elements.addRowLength.textContent = '—';
         elements.addRowQty.textContent = '—';
-        elements.addComponentButton.disabled = true;
         return;
     }
     elements.addRowLength.textContent = String(record.lengthOfDetailCm);
     elements.addRowQty.textContent = String(record.qty_needed);
-    elements.addComponentButton.disabled = false;
 }
 
 function resetPicker() {
