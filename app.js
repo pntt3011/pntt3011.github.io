@@ -3,25 +3,7 @@ import initWasm, { compute_cutting_plan } from './lib/pkg/steel_cutting_wasm.js'
 const MAX_PRIMARY_PATTERNS = 4;
 
 /* ── DOM refs ── */
-const elements = {
-    datasetStatus: document.getElementById("datasetStatus"),
-    matchCount: document.getElementById("matchCount"),
-    lengthOfBoxCm: document.getElementById("lengthOfBoxCm"),
-    widthOfBoxCm: document.getElementById("widthOfBoxCm"),
-    materialLengthCm: document.getElementById("materialLengthCm"),
-    orderSelect: document.getElementById("orderSelect"),
-    parentSelect: document.getElementById("parentSelect"),
-    componentSelect: document.getElementById("componentSelect"),
-    resetSelectionButton: document.getElementById("resetSelectionButton"),
-    addRowLength: document.getElementById("addRowLength"),
-    addRowQty: document.getElementById("addRowQty"),
-    selectedListBody: document.getElementById("selectedListBody"),
-    calculateButton: document.getElementById("calculateButton"),
-    resultSummary: document.getElementById("resultSummary"),
-    resultList: document.getElementById("resultList"),
-    selectedRowTemplate: document.getElementById("selectedRowTemplate"),
-    resultCardTemplate: document.getElementById("resultCardTemplate"),
-};
+let elements = {};
 
 /* ── State ── */
 const state = {
@@ -34,9 +16,44 @@ const state = {
 
 const DATA_URL = "./data/cutting_components.json";
 
-init().catch((error) => {
-    setStatus("error", `Failed to initialize: ${error.message}`);
-});
+// Boot logic
+async function boot() {
+    // 1. Initialize elements (only after DOM is ready)
+    elements = {
+        datasetStatus:        document.getElementById("datasetStatus"),
+        matchCount:           document.getElementById("matchCount"),
+        lengthOfBoxCm:        document.getElementById("lengthOfBoxCm"),
+        widthOfBoxCm:         document.getElementById("widthOfBoxCm"),
+        materialLengthCm:     document.getElementById("materialLengthCm"),
+        orderSelect:          document.getElementById("orderSelect"),
+        parentSelect:         document.getElementById("parentSelect"),
+        componentSelect:      document.getElementById("componentSelect"),
+        resetSelectionButton: document.getElementById("resetSelectionButton"),
+        addRowLength:         document.getElementById("addRowLength"),
+        addRowQty:            document.getElementById("addRowQty"),
+        selectedListBody:     document.getElementById("selectedListBody"),
+        calculateButton:      document.getElementById("calculateButton"),
+        resultSummary:        document.getElementById("resultSummary"),
+        resultList:           document.getElementById("resultList"),
+        selectedRowTemplate:  document.getElementById("selectedRowTemplate"),
+        resultCardTemplate:   document.getElementById("resultCardTemplate"),
+    };
+
+    // 2. Run app initialization
+    try {
+        await init();
+    } catch (error) {
+        console.error("Initialization failed:", error);
+        setStatus("error", `Failed to initialize: ${error.message}`);
+    }
+}
+
+// Start the boot sequence
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+} else {
+    boot();
+}
 
 /* ── Bootstrap ── */
 async function init() {
@@ -136,7 +153,7 @@ function refreshSelectors() {
             state.records.filter(r => Number(r.lengthOfBoxCm) === length).map(r => Number(r.widthOfBoxCm))
         );
         setOptions(elements.widthOfBoxCm, availableWidths.map(v => option(String(v), String(v))));
-        
+
         // Preserve selected width if still valid, otherwise default to first available
         if (width != null && availableWidths.includes(width)) {
             elements.widthOfBoxCm.value = String(width);
@@ -376,10 +393,10 @@ function renderResults(result, stockLength = 0) {
     for (const pattern of result.patterns) {
         const item = document.createElement("li");
         const main = document.createElement("strong");
-        main.textContent = `${pattern.cuts.join(" + ")} × ${pattern.qty} · waste ${pattern.waste} cm`;
+        main.textContent = `${pattern.cuts.join(" + ")} × ${pattern.qty} · waste ${pattern.waste} mm`;
         const detail = document.createElement("span");
         detail.className = "pattern-line";
-        detail.textContent = `Used ${pattern.used_length} cm of ${stockLength} cm${pattern.is_fallback ? " · fallback" : ""}`;
+        detail.textContent = `Used ${pattern.used_length} mm of ${stockLength} mm${pattern.is_fallback ? " · fallback" : ""}`;
         item.append(main, detail);
         list.appendChild(item);
     }
