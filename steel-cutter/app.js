@@ -30,7 +30,6 @@ async function boot() {
         lengthSelect: document.getElementById("lengthSelect"),
         addRowQtyInput: document.getElementById("addRowQtyInput"),
         addComponentButton: document.getElementById("addComponentButton"),
-        resetSelectionButton: document.getElementById("resetSelectionButton"),
         selectedListBody: document.getElementById("selectedListBody"),
         calculateButton: document.getElementById("calculateButton"),
         resultList: document.getElementById("resultList"),
@@ -94,11 +93,6 @@ function bindEvents() {
 
     elements.addComponentButton.addEventListener("click", () => {
         addSelectedLength();
-    });
-
-    // Reset picker
-    elements.resetSelectionButton.addEventListener("click", () => {
-        resetPicker();
     });
 
     // Calculate
