@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use wasm_bindgen::prelude::*;
+
+const MAX_PRIMARY_PATTERNS: usize = 6;
+const BEAM_WIDTH: usize = 200;
+const CANDIDATES_PER_STATE: usize = 100;
+const RANDOM_CANDIDATE_COUNT: usize = 80;
+const KNAPSACK_CANDIDATE_LIMIT: usize = 80;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Item {
@@ -39,12 +45,6 @@ struct State {
     stock_qty: u32,
 }
 
-const MAX_PRIMARY_PATTERNS: usize = 7;
-const BEAM_WIDTH: usize = 200;
-const CANDIDATES_PER_STATE: usize = 80;
-const RANDOM_CANDIDATE_COUNT: usize = 80;
-
-
 #[wasm_bindgen]
 pub fn compute_cutting_plan(
     items: JsValue,
@@ -54,70 +54,109 @@ pub fn compute_cutting_plan(
     let items: Vec<Item> = serde_wasm_bindgen::from_value(items)
         .map_err(|e| JsValue::from_str(&format!("Invalid items input: {}", e)))?;
 
-    // --- Pre-process: Group items by length ---
-    let mut length_to_items: std::collections::BTreeMap<u32, Vec<Item>> = std::collections::BTreeMap::new();
-    for item in &items {
-        length_to_items.entry(item.length).or_default().push(item.clone());
+    let grouped_items = group_items_by_length(&items);
+
+    let mut result = compute_with_fallback(&grouped_items, stock_length, bundle_size)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    result.patterns = repopulate_original_labels(result.patterns, items);
+
+    serde_wasm_bindgen::to_value(&result)
+        .map_err(|e| JsValue::from_str(&format!("Failed to serialize result: {}", e)))
+}
+
+fn group_items_by_length(items: &[Item]) -> Vec<Item> {
+    let mut length_to_items: BTreeMap<u32, Vec<Item>> = BTreeMap::new();
+
+    for item in items {
+        length_to_items
+            .entry(item.length)
+            .or_default()
+            .push(item.clone());
     }
 
     let mut grouped_items = Vec::new();
+
     for (&length, group) in &length_to_items {
         let total_qty: u32 = group.iter().map(|x| x.qty).sum();
+
         grouped_items.push(Item {
-            label: format!("{}", length),
+            label: length.to_string(),
             length,
             qty: total_qty,
         });
     }
+
     grouped_items.sort_by_key(|i| std::cmp::Reverse(i.length));
+    grouped_items
+}
 
-    // --- Run solver on grouped items ---
-    let mut result = compute_with_fallback(&grouped_items, stock_length, bundle_size)
-        .map_err(|e| JsValue::from_str(&e))?;
-
-    // --- Post-process: Repopulate original labels ---
+fn repopulate_original_labels(patterns: Vec<Pattern>, items: Vec<Item>) -> Vec<Pattern> {
     let mut pool: HashMap<u32, Vec<Item>> = HashMap::new();
+
     for item in items {
         pool.entry(item.length).or_default().push(item);
     }
-    
+
     let mut pool_state: HashMap<u32, (usize, u32)> = HashMap::new();
+
     for &length in pool.keys() {
         pool_state.insert(length, (0, 0));
     }
 
     let mut final_patterns: Vec<Pattern> = Vec::new();
 
-    for pattern in result.patterns {
+    for pattern in patterns {
         for _ in 0..pattern.qty {
             let mut new_cuts = Vec::new();
+
             for cut_str in &pattern.cuts {
-                let parts: Vec<&str> = cut_str.split(' ').collect();
-                let length: u32 = parts[0].parse().unwrap();
-                
-                let state = pool_state.get_mut(&length).unwrap();
-                let items_of_length = pool.get(&length).unwrap();
-                
-                let mut current_item_idx = state.0;
-                let mut used_from_current = state.1;
-                
-                while current_item_idx < items_of_length.len() && used_from_current >= items_of_length[current_item_idx].qty {
-                    current_item_idx += 1;
-                    used_from_current = 0;
-                }
-                
-                if current_item_idx < items_of_length.len() {
-                    let orig_item = &items_of_length[current_item_idx];
-                    new_cuts.push(format!("{} ({})", orig_item.label, length));
-                    used_from_current += 1;
-                    state.0 = current_item_idx;
-                    state.1 = used_from_current;
-                } else {
-                    new_cuts.push(cut_str.clone());
+                let length = extract_length_from_cut(cut_str);
+
+                match length {
+                    Some(length) => {
+                        let state = match pool_state.get_mut(&length) {
+                            Some(s) => s,
+                            None => {
+                                new_cuts.push(cut_str.clone());
+                                continue;
+                            }
+                        };
+
+                        let items_of_length = match pool.get(&length) {
+                            Some(items) => items,
+                            None => {
+                                new_cuts.push(cut_str.clone());
+                                continue;
+                            }
+                        };
+
+                        let mut current_item_idx = state.0;
+                        let mut used_from_current = state.1;
+
+                        while current_item_idx < items_of_length.len()
+                            && used_from_current >= items_of_length[current_item_idx].qty
+                        {
+                            current_item_idx += 1;
+                            used_from_current = 0;
+                        }
+
+                        if current_item_idx < items_of_length.len() {
+                            let original = &items_of_length[current_item_idx];
+                            new_cuts.push(format!("{} ({})", original.label, length));
+                            used_from_current += 1;
+                            state.0 = current_item_idx;
+                            state.1 = used_from_current;
+                        } else {
+                            new_cuts.push(cut_str.clone());
+                        }
+                    }
+                    None => new_cuts.push(cut_str.clone()),
                 }
             }
-            
+
             let mut found = false;
+
             for p in final_patterns.iter_mut().rev() {
                 if p.cuts == new_cuts && p.is_fallback == pattern.is_fallback {
                     p.qty += 1;
@@ -125,7 +164,7 @@ pub fn compute_cutting_plan(
                     break;
                 }
             }
-            
+
             if !found {
                 final_patterns.push(Pattern {
                     cuts: new_cuts,
@@ -138,10 +177,19 @@ pub fn compute_cutting_plan(
         }
     }
 
-    result.patterns = final_patterns;
+    final_patterns
+}
 
-    serde_wasm_bindgen::to_value(&result)
-        .map_err(|e| JsValue::from_str(&format!("Failed to serialize result: {}", e)))
+fn extract_length_from_cut(cut: &str) -> Option<u32> {
+    if let Some(start) = cut.rfind('(') {
+        if let Some(end) = cut.rfind(')') {
+            if end > start + 1 {
+                return cut[start + 1..end].trim().parse::<u32>().ok();
+            }
+        }
+    }
+
+    cut.split_whitespace().next()?.parse::<u32>().ok()
 }
 
 pub fn compute_with_fallback(
@@ -151,7 +199,10 @@ pub fn compute_with_fallback(
 ) -> Result<CuttingResult, String> {
     validate(items, stock_length, bundle_size)?;
 
-    let primary_demand: Vec<u32> = items.iter().map(|x| (x.qty / bundle_size) * bundle_size).collect();
+    let primary_demand: Vec<u32> = items
+        .iter()
+        .map(|x| (x.qty / bundle_size) * bundle_size)
+        .collect();
 
     let total_required: u32 = items.iter().map(|x| x.length * x.qty).sum();
 
@@ -210,6 +261,7 @@ fn solve_primary_patterns(
     }];
 
     let mut best_state = beam[0].clone();
+    let mut best_score = final_objective_score(&best_state, lengths, stock_length);
 
     for _depth in 0..MAX_PRIMARY_PATTERNS {
         let mut next_states = Vec::new();
@@ -233,9 +285,6 @@ fn solve_primary_patterns(
                     continue;
                 }
 
-                // Prefer full-bundle pattern repetitions first.
-                // Non-bundle quantities are still allowed as a fallback so
-                // the primary solver does not get stuck.
                 for q in trial_quantities(max_repeat, bundle_size) {
                     let mut new_remaining = state.remaining.clone();
 
@@ -259,42 +308,65 @@ fn solve_primary_patterns(
             break;
         }
 
-        // Deduplicate states with the same remaining demand.
-        // Keep the best state for each remaining vector.
-        let mut best_by_remaining: HashMap<Vec<u32>, State> = HashMap::new();
-        for state in next_states {
-            best_by_remaining
-                .entry(state.remaining.clone())
-                .and_modify(|existing| {
-                    if score_state(&state, lengths, stock_length, bundle_size)
-                        < score_state(existing, lengths, stock_length, bundle_size)
-                    {
-                        *existing = state.clone();
-                    }
-                })
-                .or_insert(state);
-        }
+        dedup_states_by_remaining(&mut next_states, lengths, stock_length);
 
-        let mut deduped: Vec<State> = best_by_remaining.into_values().collect();
-        deduped.sort_by_key(|s| score_state(s, lengths, stock_length, bundle_size));
-        deduped.truncate(BEAM_WIDTH);
+        next_states.sort_by_key(|s| score_state(s, lengths, stock_length));
+        next_states.truncate(BEAM_WIDTH);
 
-        for s in &deduped {
-            if final_objective_score(s, lengths, stock_length, bundle_size)
-                < final_objective_score(&best_state, lengths, stock_length, bundle_size)
-            {
+        let mut improved = false;
+
+        for s in &next_states {
+            let s_score = final_objective_score(s, lengths, stock_length);
+
+            if s_score < best_score {
                 best_state = s.clone();
+                best_score = s_score;
+                improved = true;
             }
         }
 
-        beam = deduped;
+        beam = next_states;
 
         if let Some(done) = beam.iter().find(|s| is_done(&s.remaining)) {
             return done.clone();
         }
+
+        // If the search no longer improves and all states are clearly worse than
+        // the best known state, stop early to avoid browser/WASM freezes.
+        if !improved {
+            let best_beam_score = beam
+                .iter()
+                .map(|s| final_objective_score(s, lengths, stock_length))
+                .min()
+                .unwrap_or(best_score);
+
+            if best_beam_score >= best_score {
+                break;
+            }
+        }
     }
 
     best_state
+}
+
+fn dedup_states_by_remaining(states: &mut Vec<State>, lengths: &[u32], stock_length: u32) {
+    let mut best_by_remaining: HashMap<Vec<u32>, State> = HashMap::new();
+
+    for state in states.drain(..) {
+        let key = state.remaining.clone();
+        let replace = match best_by_remaining.get(&key) {
+            None => true,
+            Some(existing) => {
+                score_state(&state, lengths, stock_length) < score_state(existing, lengths, stock_length)
+            }
+        };
+
+        if replace {
+            best_by_remaining.insert(key, state);
+        }
+    }
+
+    *states = best_by_remaining.into_values().collect();
 }
 
 fn generate_candidates(
@@ -329,7 +401,7 @@ fn generate_candidates(
         push_candidate(&mut set, &mut candidates, cand);
     }
 
-    // 3. Other greedy order for high-demand items.
+    // 3. High-demand greedy variants.
     for order in &orders {
         let cand = greedy_pattern(lengths, remaining, stock_length, order, None);
         push_candidate(&mut set, &mut candidates, cand);
@@ -358,7 +430,7 @@ fn generate_candidates(
         }
     }
 
-    // 5. Deterministic random variants, but still biased by length.
+    // 5. Deterministic random variants, still biased by long-first order.
     let mut rng = Lcg::new(1234567);
 
     for _ in 0..RANDOM_CANDIDATE_COUNT {
@@ -373,30 +445,132 @@ fn generate_candidates(
         push_candidate(&mut set, &mut candidates, cand);
     }
 
+    // 6. Bounded knapsack candidates. These often reduce total bar count because
+    // they search tight stock-length combinations that greedy may miss.
+    let knapsack_candidates = generate_knapsack_candidates(
+        lengths,
+        remaining,
+        stock_length,
+        KNAPSACK_CANDIDATE_LIMIT.min(limit),
+    );
+
+    for cand in knapsack_candidates {
+        push_candidate(&mut set, &mut candidates, cand);
+    }
+
     let longest_remaining = desc.iter().find(|&&i| remaining[i] > 0).copied();
 
     candidates.sort_by_key(|c| {
         let waste = stock_length - c.used;
+
         let uses_longest = match longest_remaining {
             Some(i) => {
-                if c.counts[i] > 0 {
-                    0
-                } else {
-                    1
-                }
+                if c.counts[i] > 0 { 0 } else { 1 }
             }
             None => 0,
         };
 
         (
-            uses_longest,
             waste,
+            uses_longest,
             std::cmp::Reverse(c.used),
             std::cmp::Reverse(c.counts.iter().filter(|&&x| x > 0).count()),
         )
     });
 
     candidates.truncate(limit);
+    candidates
+}
+
+fn generate_knapsack_candidates(
+    lengths: &[u32],
+    remaining: &[u32],
+    stock_length: u32,
+    limit: usize,
+) -> Vec<Candidate> {
+    let n = lengths.len();
+
+    if n == 0 || stock_length == 0 || limit == 0 {
+        return vec![];
+    }
+
+    let capacity = stock_length as usize;
+    let mut dp: Vec<Option<Candidate>> = vec![None; capacity + 1];
+
+    dp[0] = Some(Candidate {
+        counts: vec![0; n],
+        used: 0,
+    });
+
+    for i in 0..n {
+        let len = lengths[i] as usize;
+
+        if remaining[i] == 0 || len == 0 || len > capacity {
+            continue;
+        }
+
+        // For one stock bar, this item can never appear more times than capacity / len.
+        // This cap keeps the bounded knapsack small even when demand qty is huge.
+        let max_qty_in_one_bar = std::cmp::min(remaining[i], stock_length / lengths[i]);
+
+        for _ in 0..max_qty_in_one_bar {
+            let prev_dp = dp.clone();
+
+            for used in 0..=capacity {
+                let prev = match &prev_dp[used] {
+                    Some(p) => p,
+                    None => continue,
+                };
+
+                let new_used = used + len;
+
+                if new_used > capacity {
+                    continue;
+                }
+
+                let mut next = prev.clone();
+                next.counts[i] += 1;
+                next.used += lengths[i];
+
+                let should_replace = match &dp[new_used] {
+                    None => true,
+                    Some(existing) => {
+                        let existing_kinds = existing.counts.iter().filter(|&&x| x > 0).count();
+                        let next_kinds = next.counts.iter().filter(|&&x| x > 0).count();
+
+                        next_kinds > existing_kinds
+                    }
+                };
+
+                if should_replace {
+                    dp[new_used] = Some(next);
+                }
+            }
+        }
+    }
+
+    let mut candidates = Vec::new();
+    let mut seen: HashSet<Vec<u32>> = HashSet::new();
+
+    for used in (1..=capacity).rev() {
+        let cand = match dp[used].clone() {
+            Some(c) => c,
+            None => continue,
+        };
+
+        if cand.used == 0 {
+            continue;
+        }
+
+        if seen.insert(cand.counts.clone()) {
+            candidates.push(cand);
+        }
+
+        if candidates.len() >= limit {
+            break;
+        }
+    }
+
     candidates
 }
 
@@ -482,11 +656,9 @@ fn best_fit_fallback(lengths: &[u32], remaining: &[u32], stock_length: u32) -> V
     bars
 }
 
+// Strict bundle mode: every primary pattern quantity must be divisible by bundle_size.
+// Anything below one full bundle remains for fallback/secondary cutting.
 fn trial_quantities(max_repeat: u32, bundle_size: u32) -> Vec<u32> {
-    // Strict mode: primary pattern quantities must be full bundle multiples.
-    // Example: bundle_size = 60 -> valid q values are 60, 120, 180, ...
-    // If max_repeat < bundle_size, no primary quantity is valid; that demand
-    // remains for secondary/fallback cutting.
     if bundle_size == 0 {
         return vec![];
     }
@@ -497,10 +669,7 @@ fn trial_quantities(max_repeat: u32, bundle_size: u32) -> Vec<u32> {
         return vec![];
     }
 
-    let mut values = vec![
-        max_bundle_repeat * bundle_size,
-        bundle_size,
-    ];
+    let mut values = vec![max_bundle_repeat * bundle_size, bundle_size];
 
     if max_bundle_repeat > 1 {
         values.push((max_bundle_repeat / 2) * bundle_size);
@@ -517,7 +686,11 @@ fn trial_quantities(max_repeat: u32, bundle_size: u32) -> Vec<u32> {
 
     values.sort_by_key(|&q| std::cmp::Reverse(q));
     values.dedup();
-    values.into_iter().filter(|&q| q > 0 && q <= max_repeat && q % bundle_size == 0).collect()
+
+    values
+        .into_iter()
+        .filter(|&q| q > 0 && q <= max_repeat && q % bundle_size == 0)
+        .collect()
 }
 
 fn max_pattern_repeat(candidate: &Candidate, remaining: &[u32]) -> u32 {
@@ -531,11 +704,7 @@ fn max_pattern_repeat(candidate: &Candidate, remaining: &[u32]) -> u32 {
         }
     }
 
-    if max_repeat == u32::MAX {
-        0
-    } else {
-        max_repeat
-    }
+    if max_repeat == u32::MAX { 0 } else { max_repeat }
 }
 
 fn push_candidate(
@@ -576,24 +745,27 @@ fn selected_used_length(state: &State) -> u32 {
 }
 
 fn selected_waste(state: &State, stock_length: u32) -> u32 {
+    let selected_used = selected_used_length(state);
     let selected_stock = state.stock_qty * stock_length;
-    selected_stock.saturating_sub(selected_used_length(state))
+    selected_stock.saturating_sub(selected_used)
 }
 
+// Fast lower-bound estimate, used while sorting the beam.
 fn estimate_secondary_bars_fast(
     lengths: &[u32],
     remaining: &[u32],
     stock_length: u32,
 ) -> u32 {
-    let len = remaining_length(lengths, remaining);
+    let total = remaining_length(lengths, remaining);
 
-    if len == 0 {
+    if total == 0 {
         0
     } else {
-        (len + stock_length - 1) / stock_length
+        (total + stock_length - 1) / stock_length
     }
 }
 
+// More realistic estimate, used for final business-objective comparison.
 fn estimate_secondary_bars_bfd(
     lengths: &[u32],
     remaining: &[u32],
@@ -606,73 +778,36 @@ fn estimate_secondary_bars_bfd(
     best_fit_fallback(lengths, remaining, stock_length).len() as u32
 }
 
-fn estimated_total_waste(
-    state: &State,
-    lengths: &[u32],
-    stock_length: u32,
-    secondary_bars: u32,
-) -> u32 {
-    let primary_waste = selected_waste(state, stock_length);
+// Softer beam score: keeps search from getting stuck too early.
+fn score_state(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
+    let secondary_bars = estimate_secondary_bars_fast(lengths, &state.remaining, stock_length);
+    let total_bars = state.stock_qty + secondary_bars;
+
     let rem_len = remaining_length(lengths, &state.remaining);
-    let secondary_stock = secondary_bars * stock_length;
-    let secondary_waste = secondary_stock.saturating_sub(rem_len);
+    let secondary_waste = (secondary_bars * stock_length).saturating_sub(rem_len);
+    let total_waste = selected_waste(state, stock_length) + secondary_waste;
 
-    primary_waste + secondary_waste
+    total_bars as i64 * 1_000_000
+        + secondary_bars as i64 * 200_000
+        + total_waste as i64 * 1_000
+        + rem_len as i64 * 10
 }
 
-fn primary_non_bundle_qty(state: &State, bundle_size: u32) -> u32 {
-    if bundle_size <= 1 {
-        return 0;
-    }
+// Hard final objective:
+// 1. Lowest estimated total stock bar qty
+// 2. Lowest estimated secondary/manual bar qty
+// 3. Lowest estimated total waste
+fn final_objective_score(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
+    let secondary_bars = estimate_secondary_bars_bfd(lengths, &state.remaining, stock_length);
+    let total_bars = state.stock_qty + secondary_bars;
 
-    state
-        .selected
-        .iter()
-        .map(|(_, qty)| qty % bundle_size)
-        .sum()
-}
+    let rem_len = remaining_length(lengths, &state.remaining);
+    let secondary_waste = (secondary_bars * stock_length).saturating_sub(rem_len);
+    let total_waste = selected_waste(state, stock_length) + secondary_waste;
 
-fn score_state(state: &State, lengths: &[u32], stock_length: u32, bundle_size: u32) -> i64 {
-    // Fast, softer score for beam search. It avoids repeatedly running BFD
-    // while still ranking by the real priority:
-    // 1. lowest total stock bars
-    // 2. lowest secondary/manual bars
-    // 3. lowest waste
-    let estimated_secondary_bars =
-        estimate_secondary_bars_fast(lengths, &state.remaining, stock_length);
-
-    let estimated_total_bars = state.stock_qty + estimated_secondary_bars;
-    let waste = estimated_total_waste(state, lengths, stock_length, estimated_secondary_bars);
-
-    let non_bundle_primary_qty = primary_non_bundle_qty(state, bundle_size);
-
-    estimated_total_bars as i64 * 1_000_000
-        + estimated_secondary_bars as i64 * 100_000
-        + waste as i64 * 100
-        + non_bundle_primary_qty as i64
-}
-
-fn final_objective_score(state: &State, lengths: &[u32], stock_length: u32, bundle_size: u32) -> i64 {
-    // More accurate hard business objective used to choose best_state.
-    // This uses actual Best-Fit Decreasing to estimate secondary/manual bars.
-    let estimated_secondary_bars =
-        estimate_secondary_bars_bfd(lengths, &state.remaining, stock_length);
-
-    let estimated_total_bars = state.stock_qty + estimated_secondary_bars;
-    let waste = estimated_total_waste(state, lengths, stock_length, estimated_secondary_bars);
-
-    let non_bundle_primary_qty = primary_non_bundle_qty(state, bundle_size);
-
-    estimated_total_bars as i64 * 1_000_000_000
-        + estimated_secondary_bars as i64 * 100_000_000
-        + waste as i64 * 10_000
-        + non_bundle_primary_qty as i64
-}
-
-fn score_partial_progress(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
-    // Kept for compatibility/debug use. The solver now uses final_objective_score
-    // when updating best_state.
-    final_objective_score(state, lengths, stock_length, 1)
+    total_bars as i64 * 1_000_000_000
+        + secondary_bars as i64 * 100_000_000
+        + total_waste as i64 * 10_000
 }
 
 fn build_result(
@@ -706,7 +841,7 @@ fn build_result(
 
     let stock_qty: u32 = patterns.iter().map(|p| p.qty).sum();
     let total_stock = stock_qty * stock_length;
-    let total_waste = total_stock - total_required;
+    let total_waste = total_stock.saturating_sub(total_required);
 
     let percentage_wasted = if total_stock == 0 {
         0.0
@@ -742,6 +877,7 @@ fn insert_pattern(
 
             for i in sorted_indices {
                 let count = candidate.counts[i];
+
                 for _ in 0..count {
                     cuts.push(format!("{} ({})", items[i].label, items[i].length));
                 }
