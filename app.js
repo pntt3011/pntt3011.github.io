@@ -25,6 +25,7 @@ async function boot() {
         lengthOfBoxCm: document.getElementById("lengthOfBoxCm"),
         widthOfBoxCm: document.getElementById("widthOfBoxCm"),
         materialLengthCm: document.getElementById("materialLengthCm"),
+        bundleSize: document.getElementById("bundleSize"),
         orderSelect: document.getElementById("orderSelect"),
         parentSelect: document.getElementById("parentSelect"),
         componentSelect: document.getElementById("componentSelect"),
@@ -61,7 +62,7 @@ async function init() {
     await loadWasm();
     setStatus("ready", "Ready");
     refreshSelectors();
-    renderSelectedRows();
+    populateAllMatchingComponents();
     renderResults([]);
 }
 
@@ -76,12 +77,9 @@ function bindEvents() {
     // Material selects
     [elements.lengthOfBoxCm, elements.widthOfBoxCm].forEach((el) => {
         el.addEventListener("change", () => {
-            // Clear current list and results when dimensions change
-            state.selectedRows = [];
-            renderSelectedRows();
-            renderResults([]);
-
             refreshSelectors();
+            populateAllMatchingComponents();
+            renderResults([]);
             updateCalculateState();
         });
     });
@@ -118,6 +116,7 @@ function bindEvents() {
 
     // Stock-length input
     elements.materialLengthCm.addEventListener("input", updateCalculateState);
+    elements.bundleSize.addEventListener("input", updateCalculateState);
 }
 
 /* ── Data loading ── */
@@ -354,13 +353,15 @@ function renderSelectedRows() {
 function updateCalculateState() {
     const ready = state.wasmReady &&
         state.selectedRows.length > 0 &&
-        numberValue(elements.materialLengthCm) != null;
+        numberValue(elements.materialLengthCm) != null &&
+        numberValue(elements.bundleSize) != null;
     elements.calculateButton.disabled = !ready;
 }
 
 /* ── Optimize ── */
 async function calculate() {
     const stockLength = numberValue(elements.materialLengthCm);
+    const bundleSize = numberValue(elements.bundleSize) || 10;
     if (!state.computeCuttingPlan || stockLength == null || state.selectedRows.length === 0) return;
 
     const items = state.selectedRows.map(row => ({
@@ -369,7 +370,7 @@ async function calculate() {
         qty: row.qty_needed,
     }));
 
-    const result = state.computeCuttingPlan(items, stockLength, MAX_PRIMARY_PATTERNS);
+    const result = state.computeCuttingPlan(items, stockLength, MAX_PRIMARY_PATTERNS, bundleSize);
 
 
     renderResults(result, stockLength);
@@ -412,7 +413,8 @@ function renderResults(result, stockLength = 0) {
         // Pattern Header: "Pattern 1 × 198"
         const header = document.createElement("div");
         header.className = "pattern-header";
-        header.innerHTML = `<strong>Pattern ${patternIndex++}</strong> <span class="pattern-qty">× ${pattern.qty}</span>`;
+        const secondarySuffix = pattern.is_fallback ? ' <small>(secondary)</small>' : '';
+        header.innerHTML = `<strong>Pattern ${patternIndex++}${secondarySuffix}</strong> <span class="pattern-qty">× ${pattern.qty}</span>`;
         item.appendChild(header);
 
         // Group components in this pattern by label
@@ -440,6 +442,18 @@ function renderResults(result, stockLength = 0) {
     }
 
     elements.resultList.appendChild(fragment);
+}
+
+function populateAllMatchingComponents() {
+    state.selectedRows = state.filteredRecords.map(record => ({
+        key: componentKey(record),
+        order_name: record.order_name,
+        parent_component_name: record.parent_component_name,
+        component_name: record.component_name,
+        lengthOfDetailCm: Number(record.lengthOfDetailCm),
+        qty_needed: Number(record.qty_needed),
+    }));
+    renderSelectedRows();
 }
 
 /* ── Utilities ── */

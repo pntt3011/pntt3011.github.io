@@ -100,7 +100,7 @@ h2.section-title {
 /* ── Material row ── */
 .material-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 16px;
 }
 
@@ -390,6 +390,7 @@ select:disabled { opacity: 0.5; cursor: not-allowed; background: #f1f5f9; }
 }
 .pattern-header { display: flex; justify-content: space-between; align-items: center; }
 .pattern-header strong { font-size: 1rem; color: var(--accent); }
+.pattern-header small { color: var(--muted); font-size: 0.8rem; font-weight: 500; margin-left: 4px; }
 .pattern-qty { font-weight: 700; color: var(--text); background: var(--accent-muted); padding: 2px 8px; border-radius: 6px; font-size: 0.85rem; }
 
 .pattern-sublist { list-style: none; padding: 0; display: grid; gap: 6px; }

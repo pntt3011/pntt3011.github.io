@@ -468,31 +468,56 @@ fn score_state(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
         .map(|(l, q)| l * q)
         .sum();
 
-    let lower_bound_extra_bars = if remaining_length == 0 {
+    let remaining_items: u32 = state.remaining.iter().sum();
+
+    let remaining_kinds: u32 = state
+        .remaining
+        .iter()
+        .filter(|&&q| q > 0)
+        .count() as u32;
+
+    let estimated_fallback_bars = if remaining_length == 0 {
         0
     } else {
         (remaining_length + stock_length - 1) / stock_length
     };
 
-    let selected_used: u32 = state.selected.iter().map(|(p, q)| p.used * q).sum();
+    let selected_used: u32 = state
+        .selected
+        .iter()
+        .map(|(p, q)| p.used * q)
+        .sum();
+
     let selected_stock = state.stock_qty * stock_length;
     let selected_waste = selected_stock.saturating_sub(selected_used);
 
+    let primary_pattern_count = state.selected.len() as u32;
+
+    // Penalize long remaining components more strongly.
     let long_remaining_penalty: u32 = lengths
         .iter()
         .zip(state.remaining.iter())
         .map(|(l, q)| l * q)
         .sum();
 
-    (
-        state.stock_qty as i64 * 10_000
-            + lower_bound_extra_bars as i64 * 10_000
-            + selected_waste as i64 * 10
-            + long_remaining_penalty as i64
-    )
+    // Practical factory objective:
+    //
+    // 1. Use fewer total bars.
+    // 2. Leave less work for fallback.
+    // 3. Reduce number of secondary item types.
+    // 4. Reduce waste.
+    // 5. Finish long parts early.
+    // 6. Keep primary pattern count simple.
+    state.stock_qty as i64 * 1_000_000
+        + estimated_fallback_bars as i64 * 500_000
+        + remaining_kinds as i64 * 100_000
+        + remaining_items as i64 * 10_000
+        + selected_waste as i64 * 100
+        + long_remaining_penalty as i64 * 10
+        + primary_pattern_count as i64 * 1_000
 }
 
-fn score_partial_progress(state: &State, lengths: &[u32]) -> i64 {
+fn score_partial_progress(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
     let remaining_length: u32 = lengths
         .iter()
         .zip(state.remaining.iter())
@@ -501,7 +526,22 @@ fn score_partial_progress(state: &State, lengths: &[u32]) -> i64 {
 
     let remaining_items: u32 = state.remaining.iter().sum();
 
-    (remaining_length as i64 * 100) + remaining_items as i64
+    let remaining_kinds: u32 = state
+        .remaining
+        .iter()
+        .filter(|&&q| q > 0)
+        .count() as u32;
+
+    let estimated_fallback_bars = if remaining_length == 0 {
+        0
+    } else {
+        (remaining_length + stock_length - 1) / stock_length
+    };
+
+    estimated_fallback_bars as i64 * 1_000_000
+        + remaining_kinds as i64 * 100_000
+        + remaining_items as i64 * 10_000
+        + remaining_length as i64
 }
 
 fn build_result(
@@ -566,8 +606,12 @@ fn insert_pattern(
         .or_insert_with(|| {
             let mut cuts = Vec::new();
 
-            for (i, count) in candidate.counts.iter().enumerate() {
-                for _ in 0..*count {
+            let mut sorted_indices: Vec<usize> = (0..items.len()).collect();
+            sorted_indices.sort_by_key(|&i| items[i].length);
+
+            for i in sorted_indices {
+                let count = candidate.counts[i];
+                for _ in 0..count {
                     cuts.push(format!("{} ({})", items[i].label, items[i].length));
                 }
             }
