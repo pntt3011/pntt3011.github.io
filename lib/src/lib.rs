@@ -39,6 +39,11 @@ struct State {
     stock_qty: u32,
 }
 
+const MAX_PRIMARY_PATTERNS: usize = 7;
+const BEAM_WIDTH: usize = 200;
+const CANDIDATES_PER_STATE: usize = 80;
+const RANDOM_CANDIDATE_COUNT: usize = 80;
+
 
 #[wasm_bindgen]
 pub fn compute_cutting_plan(
@@ -206,10 +211,7 @@ fn solve_primary_patterns(
 
     let mut best_state = beam[0].clone();
 
-    let beam_width = 400;
-    let candidates_per_state = 140;
-
-    loop {
+    for _depth in 0..MAX_PRIMARY_PATTERNS {
         let mut next_states = Vec::new();
 
         for state in &beam {
@@ -221,7 +223,7 @@ fn solve_primary_patterns(
                 lengths,
                 &state.remaining,
                 stock_length,
-                candidates_per_state,
+                CANDIDATES_PER_STATE,
             );
 
             for cand in candidates {
@@ -231,6 +233,9 @@ fn solve_primary_patterns(
                     continue;
                 }
 
+                // bundle_size is intentionally NOT used here.
+                // bundle_size only splits full-bundle demand vs secondary remainder.
+                // A pattern may be repeated any practical number of times.
                 for q in trial_quantities(max_repeat, bundle_size) {
                     let mut new_remaining = state.remaining.clone();
 
@@ -254,14 +259,27 @@ fn solve_primary_patterns(
             break;
         }
 
-        next_states.sort_by_key(|s| score_state(s, lengths, stock_length));
-        next_states.truncate(beam_width);
+        // Deduplicate states with the same remaining demand.
+        // Keep the best state for each remaining vector.
+        let mut best_by_remaining: HashMap<Vec<u32>, State> = HashMap::new();
+        for state in next_states {
+            best_by_remaining
+                .entry(state.remaining.clone())
+                .and_modify(|existing| {
+                    if score_state(&state, lengths, stock_length)
+                        < score_state(existing, lengths, stock_length)
+                    {
+                        *existing = state.clone();
+                    }
+                })
+                .or_insert(state);
+        }
 
-        for s in &next_states {
-            // Keep the best partial state according to the real business objective:
-            // 1. lowest estimated total stock bars
-            // 2. lowest estimated secondary/manual bars
-            // 3. lowest estimated total waste
+        let mut deduped: Vec<State> = best_by_remaining.into_values().collect();
+        deduped.sort_by_key(|s| score_state(s, lengths, stock_length));
+        deduped.truncate(BEAM_WIDTH);
+
+        for s in &deduped {
             if final_objective_score(s, lengths, stock_length)
                 < final_objective_score(&best_state, lengths, stock_length)
             {
@@ -269,7 +287,7 @@ fn solve_primary_patterns(
             }
         }
 
-        beam = next_states;
+        beam = deduped;
 
         if let Some(done) = beam.iter().find(|s| is_done(&s.remaining)) {
             return done.clone();
@@ -343,7 +361,7 @@ fn generate_candidates(
     // 5. Deterministic random variants, but still biased by length.
     let mut rng = Lcg::new(1234567);
 
-    for _ in 0..200 {
+    for _ in 0..RANDOM_CANDIDATE_COUNT {
         let mut order = desc.clone();
 
         for i in 0..n {
@@ -464,27 +482,21 @@ fn best_fit_fallback(lengths: &[u32], remaining: &[u32], stock_length: u32) -> V
     bars
 }
 
-fn trial_quantities(max_repeat: u32, bundle_size: u32) -> Vec<u32> {
-    let mut values = Vec::new();
+fn trial_quantities(max_repeat: u32, _bundle_size: u32) -> Vec<u32> {
+    let mut values = vec![max_repeat];
 
-    let max_bundle_repeat = max_repeat / bundle_size;
+    if max_repeat > 1 {
+        values.push(1);
+        values.push(max_repeat / 2);
+    }
 
-    if max_bundle_repeat > 0 {
-        values.push(max_bundle_repeat * bundle_size);
+    if max_repeat > 2 {
+        values.push(max_repeat - 1);
+    }
 
-        if max_bundle_repeat > 1 {
-            values.push(bundle_size);
-            values.push((max_bundle_repeat / 2) * bundle_size);
-        }
-
-        if max_bundle_repeat > 2 {
-            values.push((max_bundle_repeat - 1) * bundle_size);
-        }
-
-        if max_bundle_repeat > 4 {
-            values.push((max_bundle_repeat / 3) * bundle_size);
-            values.push(((max_bundle_repeat * 2) / 3) * bundle_size);
-        }
+    if max_repeat > 4 {
+        values.push(max_repeat / 3);
+        values.push((max_repeat * 2) / 3);
     }
 
     values.sort();
@@ -552,92 +564,80 @@ fn selected_waste(state: &State, stock_length: u32) -> u32 {
     selected_stock.saturating_sub(selected_used_length(state))
 }
 
-/// Cheap lower-bound estimate for secondary/manual bars.
-/// This is fast and useful during beam sorting, but it can underestimate
-/// when remaining lengths do not pack well together.
-fn estimate_secondary_bars_lower_bound(
+fn estimate_secondary_bars_fast(
     lengths: &[u32],
     remaining: &[u32],
     stock_length: u32,
 ) -> u32 {
-    let total = remaining_length(lengths, remaining);
+    let len = remaining_length(lengths, remaining);
 
-    if total == 0 {
+    if len == 0 {
         0
     } else {
-        (total + stock_length - 1) / stock_length
+        (len + stock_length - 1) / stock_length
     }
 }
 
-/// More realistic estimate of secondary/manual bars.
-/// It runs the same Best-Fit Decreasing fallback used by the final cleanup,
-/// then counts how many fallback bars would be required.
 fn estimate_secondary_bars_bfd(
     lengths: &[u32],
     remaining: &[u32],
     stock_length: u32,
 ) -> u32 {
     if remaining.iter().all(|&q| q == 0) {
-        0
-    } else {
-        best_fit_fallback(lengths, remaining, stock_length).len() as u32
+        return 0;
     }
+
+    best_fit_fallback(lengths, remaining, stock_length).len() as u32
 }
 
 fn estimated_total_waste(
     state: &State,
     lengths: &[u32],
     stock_length: u32,
-    estimated_secondary_bars: u32,
+    secondary_bars: u32,
 ) -> u32 {
     let primary_waste = selected_waste(state, stock_length);
     let rem_len = remaining_length(lengths, &state.remaining);
-    let secondary_stock = estimated_secondary_bars * stock_length;
+    let secondary_stock = secondary_bars * stock_length;
     let secondary_waste = secondary_stock.saturating_sub(rem_len);
 
     primary_waste + secondary_waste
 }
 
-/// Soft score used for beam sorting.
-///
-/// It follows the target objective, but uses the cheap lower-bound secondary
-/// estimate so the search stays fast and does not get stuck too early.
 fn score_state(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
+    // Fast, softer score for beam search. It avoids repeatedly running BFD
+    // while still ranking by the real priority:
+    // 1. lowest total stock bars
+    // 2. lowest secondary/manual bars
+    // 3. lowest waste
     let estimated_secondary_bars =
-        estimate_secondary_bars_lower_bound(lengths, &state.remaining, stock_length);
-    let estimated_total_bars = state.stock_qty + estimated_secondary_bars;
-    let estimated_waste =
-        estimated_total_waste(state, lengths, stock_length, estimated_secondary_bars);
+        estimate_secondary_bars_fast(lengths, &state.remaining, stock_length);
 
-    // Objective priority during exploration:
-    // 1. lowest estimated total stock bars
-    // 2. lowest estimated secondary/manual bars
-    // 3. lowest estimated waste
+    let estimated_total_bars = state.stock_qty + estimated_secondary_bars;
+    let waste = estimated_total_waste(state, lengths, stock_length, estimated_secondary_bars);
+
     estimated_total_bars as i64 * 1_000_000
         + estimated_secondary_bars as i64 * 100_000
-        + estimated_waste as i64 * 1_000
+        + waste as i64 * 100
 }
 
-/// Harder final objective used when remembering the best partial solution.
-///
-/// This uses the real fallback estimator, so the selected final state is closer
-/// to the business priority:
-/// 1. lowest stock bar qty
-/// 2. lowest secondary/manual bar qty
-/// 3. lowest waste
 fn final_objective_score(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
+    // More accurate hard business objective used to choose best_state.
+    // This uses actual Best-Fit Decreasing to estimate secondary/manual bars.
     let estimated_secondary_bars =
         estimate_secondary_bars_bfd(lengths, &state.remaining, stock_length);
+
     let estimated_total_bars = state.stock_qty + estimated_secondary_bars;
-    let estimated_waste =
-        estimated_total_waste(state, lengths, stock_length, estimated_secondary_bars);
+    let waste = estimated_total_waste(state, lengths, stock_length, estimated_secondary_bars);
 
     estimated_total_bars as i64 * 1_000_000_000
-        + estimated_secondary_bars as i64 * 10_000_000
-        + estimated_waste as i64 * 10_000
+        + estimated_secondary_bars as i64 * 100_000_000
+        + waste as i64 * 10_000
 }
 
 fn score_partial_progress(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
+    // Kept for compatibility/debug use. The solver now uses final_objective_score
+    // when updating best_state.
     final_objective_score(state, lengths, stock_length)
 }
 
