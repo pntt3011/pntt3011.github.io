@@ -45,26 +45,38 @@ pub fn compute_cutting_plan(
     items: JsValue,
     stock_length: u32,
     max_primary_patterns: usize,
+    bundle_size: u32,
 ) -> Result<JsValue, JsValue> {
     let items: Vec<Item> = serde_wasm_bindgen::from_value(items)
         .map_err(|e| JsValue::from_str(&format!("Invalid items input: {}", e)))?;
 
-    let result = compute_with_fallback(&items, stock_length, max_primary_patterns)
+    let result = compute_with_fallback(&items, stock_length, max_primary_patterns, bundle_size)
         .map_err(|e| JsValue::from_str(&e))?;
 
     serde_wasm_bindgen::to_value(&result)
         .map_err(|e| JsValue::from_str(&format!("Failed to serialize result: {}", e)))
 }
 
-fn compute_with_fallback(
+/// Computes a steel cutting plan.
+///
+/// Main behavior:
+/// - Primary phase uses up to `max_primary_patterns`.
+/// - Primary pattern quantities are aligned to `bundle_size`.
+/// - Pattern generation prioritizes largest-to-shortest greedy cutting.
+/// - Remaining demand is completed by fallback Best-Fit Decreasing.
+///
+/// `bundle_size = 60` means the main repeated patterns should consume
+/// quantities in multiples of 60 pieces.
+/// Remainders are handled as secondary/fallback patterns.
+pub fn compute_with_fallback(
     items: &[Item],
     stock_length: u32,
     max_primary_patterns: usize,
+    bundle_size: u32,
 ) -> Result<CuttingResult, String> {
-    validate(items, stock_length)?;
+    validate(items, stock_length, bundle_size)?;
 
-    let demand: Vec<u32> = items.iter().map(|x| x.qty).collect();
-    let lengths: Vec<u32> = items.iter().map(|x| x.length).collect();
+    let primary_demand: Vec<u32> = items.iter().map(|x| (x.qty / bundle_size) * bundle_size).collect();
 
     let total_required: u32 = items.iter().map(|x| x.length * x.qty).sum();
 
@@ -77,17 +89,26 @@ fn compute_with_fallback(
         });
     }
 
-    let primary_state = solve_limited_patterns(
+    let lengths: Vec<u32> = items.iter().map(|x| x.length).collect();
+
+    let primary_state = solve_primary_patterns(
         &lengths,
-        &demand,
+        &primary_demand,
         stock_length,
         max_primary_patterns,
+        bundle_size,
     );
 
-    let used_fallback = !is_done(&primary_state.remaining);
+    let mut remaining = vec![0; items.len()];
 
+    for i in 0..items.len() {
+        let used_by_primary = primary_demand[i].saturating_sub(primary_state.remaining[i]);
+        remaining[i] = items[i].qty.saturating_sub(used_by_primary);
+    }
+
+    let used_fallback = remaining.iter().any(|&x| x > 0);
     let fallback_bars = if used_fallback {
-        best_fit_fallback(&lengths, &primary_state.remaining, stock_length)
+        best_fit_fallback(&lengths, &remaining, stock_length)
     } else {
         vec![]
     };
@@ -102,11 +123,12 @@ fn compute_with_fallback(
     ))
 }
 
-fn solve_limited_patterns(
+fn solve_primary_patterns(
     lengths: &[u32],
     demand: &[u32],
     stock_length: u32,
     max_patterns: usize,
+    bundle_size: u32,
 ) -> State {
     let mut beam = vec![State {
         remaining: demand.to_vec(),
@@ -119,7 +141,7 @@ fn solve_limited_patterns(
     let beam_width = 300;
     let candidates_per_state = 120;
 
-    for _depth in 0..max_patterns {
+    for _ in 0..max_patterns {
         let mut next_states = Vec::new();
 
         for state in &beam {
@@ -127,8 +149,12 @@ fn solve_limited_patterns(
                 return state.clone();
             }
 
-            let candidates =
-                generate_candidates(lengths, &state.remaining, stock_length, candidates_per_state);
+            let candidates = generate_candidates(
+                lengths,
+                &state.remaining,
+                stock_length,
+                candidates_per_state,
+            );
 
             for cand in candidates {
                 let max_repeat = max_pattern_repeat(&cand, &state.remaining);
@@ -137,7 +163,7 @@ fn solve_limited_patterns(
                     continue;
                 }
 
-                for q in trial_quantities(max_repeat) {
+                for q in trial_quantities(max_repeat, bundle_size) {
                     let mut new_remaining = state.remaining.clone();
 
                     for i in 0..new_remaining.len() {
@@ -177,6 +203,144 @@ fn solve_limited_patterns(
     }
 
     best_state
+}
+
+fn generate_candidates(
+    lengths: &[u32],
+    remaining: &[u32],
+    stock_length: u32,
+    limit: usize,
+) -> Vec<Candidate> {
+    let n = lengths.len();
+    let mut set: HashSet<Vec<u32>> = HashSet::new();
+    let mut candidates = Vec::new();
+
+    let mut desc: Vec<usize> = (0..n).collect();
+    desc.sort_by_key(|&i| std::cmp::Reverse(lengths[i]));
+
+    let mut high_qty: Vec<usize> = (0..n).collect();
+    high_qty.sort_by_key(|&i| std::cmp::Reverse(remaining[i]));
+
+    let orders = vec![desc.clone(), high_qty];
+
+    // 1. Pure largest-to-shortest greedy.
+    let cand = greedy_pattern(lengths, remaining, stock_length, &desc, None);
+    push_candidate(&mut set, &mut candidates, cand);
+
+    // 2. Seed each long remaining component, then fill largest-to-shortest.
+    for &seed in &desc {
+        if remaining[seed] == 0 {
+            continue;
+        }
+
+        let cand = greedy_pattern(lengths, remaining, stock_length, &desc, Some(seed));
+        push_candidate(&mut set, &mut candidates, cand);
+    }
+
+    // 3. Other greedy order for high-demand items.
+    for order in &orders {
+        let cand = greedy_pattern(lengths, remaining, stock_length, order, None);
+        push_candidate(&mut set, &mut candidates, cand);
+    }
+
+    // 4. Repeated single-item patterns.
+    for &i in &desc {
+        if remaining[i] == 0 {
+            continue;
+        }
+
+        let max_count = std::cmp::min(remaining[i], stock_length / lengths[i]);
+
+        if max_count > 0 {
+            let mut counts = vec![0; n];
+            counts[i] = max_count;
+
+            push_candidate(
+                &mut set,
+                &mut candidates,
+                Candidate {
+                    counts,
+                    used: max_count * lengths[i],
+                },
+            );
+        }
+    }
+
+    // 5. Deterministic random variants, but still biased by length.
+    let mut rng = Lcg::new(1234567);
+
+    for _ in 0..200 {
+        let mut order = desc.clone();
+
+        for i in 0..n {
+            let j = rng.next_usize(n);
+            order.swap(i, j);
+        }
+
+        let cand = greedy_pattern(lengths, remaining, stock_length, &order, None);
+        push_candidate(&mut set, &mut candidates, cand);
+    }
+
+    let longest_remaining = desc.iter().find(|&&i| remaining[i] > 0).copied();
+
+    candidates.sort_by_key(|c| {
+        let waste = stock_length - c.used;
+        let uses_longest = match longest_remaining {
+            Some(i) => {
+                if c.counts[i] > 0 {
+                    0
+                } else {
+                    1
+                }
+            }
+            None => 0,
+        };
+
+        (
+            uses_longest,
+            waste,
+            std::cmp::Reverse(c.used),
+            std::cmp::Reverse(c.counts.iter().filter(|&&x| x > 0).count()),
+        )
+    });
+
+    candidates.truncate(limit);
+    candidates
+}
+
+fn greedy_pattern(
+    lengths: &[u32],
+    remaining: &[u32],
+    stock_length: u32,
+    order: &[usize],
+    seed: Option<usize>,
+) -> Candidate {
+    let n = lengths.len();
+    let mut counts = vec![0; n];
+    let mut used = 0;
+
+    if let Some(i) = seed {
+        if remaining[i] > 0 && lengths[i] <= stock_length {
+            counts[i] += 1;
+            used += lengths[i];
+        }
+    }
+
+    let mut changed = true;
+
+    while changed {
+        changed = false;
+
+        for &i in order {
+            if counts[i] < remaining[i] && used + lengths[i] <= stock_length {
+                counts[i] += 1;
+                used += lengths[i];
+                changed = true;
+            }
+        }
+    }
+
+    Candidate { counts, used }
 }
 
 fn best_fit_fallback(lengths: &[u32], remaining: &[u32], stock_length: u32) -> Vec<Candidate> {
@@ -226,144 +390,32 @@ fn best_fit_fallback(lengths: &[u32], remaining: &[u32], stock_length: u32) -> V
     bars
 }
 
-fn generate_candidates(
-    lengths: &[u32],
-    remaining: &[u32],
-    stock_length: u32,
-    limit: usize,
-) -> Vec<Candidate> {
-    let n = lengths.len();
-    let mut set: HashSet<Vec<u32>> = HashSet::new();
-    let mut candidates = Vec::new();
+fn trial_quantities(max_repeat: u32, bundle_size: u32) -> Vec<u32> {
+    let mut values = Vec::new();
 
-    let mut desc: Vec<usize> = (0..n).collect();
-    desc.sort_by_key(|&i| std::cmp::Reverse(lengths[i]));
+    let max_bundle_repeat = max_repeat / bundle_size;
 
-    let mut asc: Vec<usize> = (0..n).collect();
-    asc.sort_by_key(|&i| lengths[i]);
+    if max_bundle_repeat > 0 {
+        values.push(max_bundle_repeat * bundle_size);
 
-    let mut high_qty: Vec<usize> = (0..n).collect();
-    high_qty.sort_by_key(|&i| std::cmp::Reverse(remaining[i]));
+        if max_bundle_repeat > 1 {
+            values.push(bundle_size);
+            values.push((max_bundle_repeat / 2) * bundle_size);
+        }
 
-    let orders = vec![desc.clone(), asc.clone(), high_qty.clone()];
+        if max_bundle_repeat > 2 {
+            values.push((max_bundle_repeat - 1) * bundle_size);
+        }
 
-    for order in &orders {
-        let cand = greedy_pattern(lengths, remaining, stock_length, order, None);
-
-        if cand.used > 0 {
-            push_candidate(&mut set, &mut candidates, cand);
+        if max_bundle_repeat > 4 {
+            values.push((max_bundle_repeat / 3) * bundle_size);
+            values.push(((max_bundle_repeat * 2) / 3) * bundle_size);
         }
     }
 
-    for seed in 0..n {
-        if remaining[seed] == 0 {
-            continue;
-        }
-
-        for order in &orders {
-            let cand = greedy_pattern(lengths, remaining, stock_length, order, Some(seed));
-
-            if cand.used > 0 {
-                push_candidate(&mut set, &mut candidates, cand);
-            }
-        }
-
-        let max_count = std::cmp::min(remaining[seed], stock_length / lengths[seed]);
-
-        if max_count > 0 {
-            let mut counts = vec![0; n];
-            counts[seed] = max_count;
-
-            push_candidate(
-                &mut set,
-                &mut candidates,
-                Candidate {
-                    counts,
-                    used: max_count * lengths[seed],
-                },
-            );
-        }
-    }
-
-    let mut rng = Lcg::new(1234567);
-
-    for _ in 0..200 {
-        let mut order: Vec<usize> = (0..n).collect();
-
-        for i in 0..n {
-            let j = rng.next_usize(n);
-            order.swap(i, j);
-        }
-
-        let cand = greedy_pattern(lengths, remaining, stock_length, &order, None);
-
-        if cand.used > 0 {
-            push_candidate(&mut set, &mut candidates, cand);
-        }
-    }
-
-    candidates.sort_by_key(|c| {
-        let waste = stock_length - c.used;
-        let kinds = c.counts.iter().filter(|&&x| x > 0).count() as u32;
-
-        (
-            waste,
-            std::cmp::Reverse(c.used),
-            std::cmp::Reverse(kinds),
-        )
-    });
-
-    candidates.truncate(limit);
-    candidates
-}
-
-fn greedy_pattern(
-    lengths: &[u32],
-    remaining: &[u32],
-    stock_length: u32,
-    order: &[usize],
-    seed: Option<usize>,
-) -> Candidate {
-    let n = lengths.len();
-    let mut counts = vec![0; n];
-    let mut used = 0;
-
-    if let Some(i) = seed {
-        if remaining[i] > 0 && lengths[i] <= stock_length {
-            counts[i] += 1;
-            used += lengths[i];
-        }
-    }
-
-    let mut changed = true;
-
-    while changed {
-        changed = false;
-
-        for &i in order {
-            if counts[i] < remaining[i] && used + lengths[i] <= stock_length {
-                counts[i] += 1;
-                used += lengths[i];
-                changed = true;
-            }
-        }
-    }
-
-    Candidate { counts, used }
-}
-
-fn push_candidate(
-    set: &mut HashSet<Vec<u32>>,
-    candidates: &mut Vec<Candidate>,
-    candidate: Candidate,
-) {
-    if candidate.used == 0 {
-        return;
-    }
-
-    if set.insert(candidate.counts.clone()) {
-        candidates.push(candidate);
-    }
+    values.sort();
+    values.dedup();
+    values.into_iter().filter(|&x| x > 0).collect()
 }
 
 fn max_pattern_repeat(candidate: &Candidate, remaining: &[u32]) -> u32 {
@@ -384,26 +436,18 @@ fn max_pattern_repeat(candidate: &Candidate, remaining: &[u32]) -> u32 {
     }
 }
 
-fn trial_quantities(max_repeat: u32) -> Vec<u32> {
-    let mut values = vec![max_repeat];
-
-    if max_repeat > 1 {
-        values.push(1);
-        values.push(max_repeat / 2);
+fn push_candidate(
+    set: &mut HashSet<Vec<u32>>,
+    candidates: &mut Vec<Candidate>,
+    candidate: Candidate,
+) {
+    if candidate.used == 0 {
+        return;
     }
 
-    if max_repeat > 2 {
-        values.push(max_repeat - 1);
+    if set.insert(candidate.counts.clone()) {
+        candidates.push(candidate);
     }
-
-    if max_repeat > 4 {
-        values.push(max_repeat / 3);
-        values.push((max_repeat * 2) / 3);
-    }
-
-    values.sort();
-    values.dedup();
-    values.into_iter().filter(|&x| x > 0).collect()
 }
 
 fn add_or_merge_pattern(selected: &mut Vec<(Candidate, u32)>, candidate: Candidate, qty: u32) {
@@ -434,14 +478,18 @@ fn score_state(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
     let selected_stock = state.stock_qty * stock_length;
     let selected_waste = selected_stock.saturating_sub(selected_used);
 
-    let remaining_items: u32 = state.remaining.iter().sum();
+    let long_remaining_penalty: u32 = lengths
+        .iter()
+        .zip(state.remaining.iter())
+        .map(|(l, q)| l * q)
+        .sum();
 
     (
-        state.stock_qty * 1000
-            + lower_bound_extra_bars * 1000
-            + selected_waste
-            + remaining_items * 10
-    ) as i64
+        state.stock_qty as i64 * 10_000
+            + lower_bound_extra_bars as i64 * 10_000
+            + selected_waste as i64 * 10
+            + long_remaining_penalty as i64
+    )
 }
 
 fn score_partial_progress(state: &State, lengths: &[u32]) -> i64 {
@@ -453,11 +501,7 @@ fn score_partial_progress(state: &State, lengths: &[u32]) -> i64 {
 
     let remaining_items: u32 = state.remaining.iter().sum();
 
-    (remaining_length * 100 + remaining_items) as i64
-}
-
-fn is_done(remaining: &[u32]) -> bool {
-    remaining.iter().all(|&x| x == 0)
+    (remaining_length as i64 * 100) + remaining_items as i64
 }
 
 fn build_result(
@@ -468,7 +512,7 @@ fn build_result(
     total_required: u32,
     used_fallback: bool,
 ) -> CuttingResult {
-    let mut map: HashMap<Vec<u32>, Pattern> = HashMap::new();
+    let mut map: HashMap<(Vec<u32>, bool), Pattern> = HashMap::new();
 
     for (candidate, qty) in primary_state.selected {
         insert_pattern(&mut map, candidate, qty, items, stock_length, false);
@@ -508,17 +552,16 @@ fn build_result(
 }
 
 fn insert_pattern(
-    map: &mut HashMap<Vec<u32>, Pattern>,
+    map: &mut HashMap<(Vec<u32>, bool), Pattern>,
     candidate: Candidate,
     qty: u32,
     items: &[Item],
     stock_length: u32,
     is_fallback: bool,
 ) {
-    map.entry(candidate.counts.clone())
+    map.entry((candidate.counts.clone(), is_fallback))
         .and_modify(|p| {
             p.qty += qty;
-            p.is_fallback = p.is_fallback && is_fallback;
         })
         .or_insert_with(|| {
             let mut cuts = Vec::new();
@@ -539,9 +582,17 @@ fn insert_pattern(
         });
 }
 
-fn validate(items: &[Item], stock_length: u32) -> Result<(), String> {
+fn is_done(remaining: &[u32]) -> bool {
+    remaining.iter().all(|&x| x == 0)
+}
+
+fn validate(items: &[Item], stock_length: u32, bundle_size: u32) -> Result<(), String> {
     if stock_length == 0 {
         return Err("stock_length must be greater than 0".to_string());
+    }
+
+    if bundle_size == 0 {
+        return Err("bundle_size must be greater than 0".to_string());
     }
 
     for item in items {

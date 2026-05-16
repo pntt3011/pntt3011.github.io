@@ -398,7 +398,8 @@ function renderResults(result, stockLength = 0) {
     const meta = fragment.querySelector(".result-meta");
     meta.innerHTML = `
         <strong>${totalBars}</strong> bars used &nbsp;·&nbsp; 
-        <strong>${totalWaste}</strong> mm waste &nbsp;·&nbsp; 
+        <strong>${totalWaste}</strong> mm waste &nbsp;·&nbsp;
+        <strong>${result.percentage_wasted.toFixed(2)}</strong> % waste
     `;
 
     const list = fragment.querySelector(".pattern-list");
