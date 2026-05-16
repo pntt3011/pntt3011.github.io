@@ -175,7 +175,7 @@ pub fn compute_with_fallback(
             &mut candidates,
         );
 
-        solve_quantity_low(
+        let exact_like = solve_quantity_low(
             &lengths,
             &primary_demand,
             n,
@@ -183,7 +183,19 @@ pub fn compute_with_fallback(
             bundle_size,
             &candidates,
             candidate_count,
-        )
+        );
+
+        let simple = solve_simple_cover_low(
+            &lengths,
+            &primary_demand,
+            n,
+            stock_length,
+            bundle_size,
+            &candidates,
+            candidate_count,
+        );
+
+        choose_runtime_business_solution(exact_like, simple, lengths, n, stock_length)
     };
 
     let mut remaining = [0u32; MAX_ITEMS];
@@ -510,6 +522,130 @@ fn greedy_quantity_solution(
     state.key = state_key(&state.remaining, &state.overcut, n);
     state.score = final_score(&state, lengths, n, stock_length);
     state
+}
+
+
+fn solve_simple_cover_low(
+    lengths: &[u32; MAX_ITEMS],
+    demand: &[u32; MAX_ITEMS],
+    n: usize,
+    stock_length: u32,
+    bundle_size: u32,
+    candidates: &[Candidate; MAX_CANDIDATES],
+    candidate_count: usize,
+) -> SearchState {
+    let mut state = SearchState::new(*demand);
+
+    // Industrial-style pass: cover the longest remaining item first with a
+    // high-fill pattern that contains the most of that item. This intentionally
+    // finds compact outputs like:
+    //   [1068x3,1040x2,330x2] * 1316
+    //   [1040x5,330x2]        * 348
+    //   [330x18]              * 58
+    // instead of many tiny mathematically-equivalent patterns.
+    for _ in 0..MAX_SELECTED_PATTERNS {
+        if all_done(&state.remaining, n) { break; }
+
+        let mut target: Option<usize> = None;
+        for i in 0..n {
+            if state.remaining[i] == 0 { continue; }
+            match target {
+                None => target = Some(i),
+                Some(t) => {
+                    if lengths[i] > lengths[t] { target = Some(i); }
+                }
+            }
+        }
+
+        let Some(target_i) = target else { break; };
+        let mut best_idx: Option<usize> = None;
+        let mut best_key: (u32, u32, u32, u32) = (0, 0, 0, 0);
+
+        for c_idx in 0..candidate_count {
+            let cand = candidates[c_idx];
+            let target_count = cand.counts[target_i] as u32;
+            if target_count == 0 { continue; }
+
+            let max_rep = max_repeat_with_overcut(&cand, &state.remaining, &state.overcut, demand, n);
+            if max_rep == 0 { continue; }
+
+            // Prefer: fullest usable bar first, then more target pieces/bar, then less side overcut.
+            // This avoids choosing a poorer pattern like [1068x5] just because it has
+            // more of the target length, when [1068x3,1040x2,330x2] nearly fills the bar.
+            let side_over_risk = side_overcut_risk(&cand, &state.remaining, target_i, n);
+            let kinds = count_kinds(&cand, n);
+            let key = (cand.used, target_count, u32::MAX - side_over_risk, kinds);
+            if best_idx.is_none() || key > best_key {
+                best_idx = Some(c_idx);
+                best_key = key;
+            }
+        }
+
+        let Some(c_idx) = best_idx else { break; };
+        let cand = candidates[c_idx];
+        let c = cand.counts[target_i] as u32;
+        if c == 0 { break; }
+
+        let step = bundle_size.max(1);
+        let mut q = (state.remaining[target_i] + c - 1) / c;
+        q = ((q + step - 1) / step) * step;
+
+        let max_rep = max_repeat_with_overcut(&cand, &state.remaining, &state.overcut, demand, n);
+        if q > max_rep {
+            q = (max_rep / step) * step;
+        }
+        if q == 0 { break; }
+
+        if !apply_candidate_with_overcut(&mut state.remaining, &mut state.overcut, demand, &cand, q, n) {
+            break;
+        }
+        state.stock_qty = state.stock_qty.saturating_add(q);
+        add_selected(&mut state, c_idx, q);
+    }
+
+    state.key = state_key(&state.remaining, &state.overcut, n);
+    state.score = final_score(&state, lengths, n, stock_length);
+    state
+}
+
+fn side_overcut_risk(cand: &Candidate, remaining: &[u32; MAX_ITEMS], target_i: usize, n: usize) -> u32 {
+    let target_count = cand.counts[target_i] as u32;
+    if target_count == 0 { return u32::MAX; }
+    let q = (remaining[target_i] + target_count - 1) / target_count;
+    let mut risk = 0u32;
+    for i in 0..n {
+        if i == target_i { continue; }
+        let produce = cand.counts[i] as u32 * q;
+        risk = risk.saturating_add(produce.saturating_sub(remaining[i]));
+    }
+    risk
+}
+
+fn choose_runtime_business_solution(
+    exact_like: SearchState,
+    simple: SearchState,
+    lengths: [u32; MAX_ITEMS],
+    n: usize,
+    stock_length: u32,
+) -> SearchState {
+    if !all_done(&simple.remaining, n) { return exact_like; }
+    if !all_done(&exact_like.remaining, n) { return simple; }
+
+    let exact_total = exact_like.stock_qty + estimate_fallback_bars(&lengths, &exact_like.remaining, n, stock_length);
+    let simple_total = simple.stock_qty + estimate_fallback_bars(&lengths, &simple.remaining, n, stock_length);
+
+    // Keep hard bar optimization, but allow a very small bar tolerance when the
+    // simple solution greatly reduces operator pattern count. This matches the
+    // commercial-style 3-case output from the screenshot.
+    let tolerance = ((exact_total + 199) / 200).max(2); // about 0.5%, minimum 2 bars
+    if simple_total <= exact_total.saturating_add(tolerance)
+        && simple.selected_len + 2 < exact_like.selected_len
+    {
+        return simple;
+    }
+
+    if simple_total < exact_total { return simple; }
+    exact_like
 }
 
 fn best_fit_fallback_low(
