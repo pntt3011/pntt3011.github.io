@@ -39,7 +39,7 @@ struct State {
     stock_qty: u32,
 }
 
-const MAX_PRIMARY_PATTERNS: usize = 6;
+const MAX_PRIMARY_PATTERNS: usize = 4;
 const BEAM_WIDTH: usize = 200;
 const CANDIDATES_PER_STATE: usize = 80;
 const RANDOM_CANDIDATE_COUNT: usize = 80;
@@ -483,65 +483,41 @@ fn best_fit_fallback(lengths: &[u32], remaining: &[u32], stock_length: u32) -> V
 }
 
 fn trial_quantities(max_repeat: u32, bundle_size: u32) -> Vec<u32> {
-    let mut values = Vec::new();
-
-    // 1. Prefer quantities divisible by bundle_size.
-    // Example: bundle_size = 60, max_repeat = 881 -> try 840 first.
-    if bundle_size > 1 {
-        let max_full_bundle_qty = (max_repeat / bundle_size) * bundle_size;
-
-        if max_full_bundle_qty > 0 {
-            values.push(max_full_bundle_qty);
-            values.push(bundle_size);
-
-            let half = (max_full_bundle_qty / 2 / bundle_size) * bundle_size;
-            if half > 0 {
-                values.push(half);
-            }
-
-            if max_full_bundle_qty > bundle_size {
-                values.push(max_full_bundle_qty - bundle_size);
-            }
-
-            let one_third = (max_full_bundle_qty / 3 / bundle_size) * bundle_size;
-            if one_third > 0 {
-                values.push(one_third);
-            }
-
-            let two_third = ((max_full_bundle_qty * 2) / 3 / bundle_size) * bundle_size;
-            if two_third > 0 {
-                values.push(two_third);
-            }
-        }
+    // Strict mode: primary pattern quantities must be full bundle multiples.
+    // Example: bundle_size = 60 -> valid q values are 60, 120, 180, ...
+    // If max_repeat < bundle_size, no primary quantity is valid; that demand
+    // remains for secondary/fallback cutting.
+    if bundle_size == 0 {
+        return vec![];
     }
 
-    // 2. Fallback: allow normal quantities so the solver can still find a plan
-    // when full-bundle repetitions are impossible or inefficient.
-    values.push(max_repeat);
+    let max_bundle_repeat = max_repeat / bundle_size;
 
-    if max_repeat > 1 {
-        values.push(1);
-        values.push(max_repeat / 2);
+    if max_bundle_repeat == 0 {
+        return vec![];
     }
 
-    if max_repeat > 2 {
-        values.push(max_repeat - 1);
+    let mut values = vec![
+        max_bundle_repeat * bundle_size,
+        bundle_size,
+    ];
+
+    if max_bundle_repeat > 1 {
+        values.push((max_bundle_repeat / 2) * bundle_size);
     }
 
-    if max_repeat > 4 {
-        values.push(max_repeat / 3);
-        values.push((max_repeat * 2) / 3);
+    if max_bundle_repeat > 2 {
+        values.push((max_bundle_repeat - 1) * bundle_size);
     }
 
-    values.sort_by_key(|&q| {
-        let non_bundle_penalty = if bundle_size > 1 { q % bundle_size } else { 0 };
-        (
-            non_bundle_penalty,
-            std::cmp::Reverse(q),
-        )
-    });
+    if max_bundle_repeat > 4 {
+        values.push((max_bundle_repeat / 3) * bundle_size);
+        values.push(((max_bundle_repeat * 2) / 3) * bundle_size);
+    }
+
+    values.sort_by_key(|&q| std::cmp::Reverse(q));
     values.dedup();
-    values.into_iter().filter(|&x| x > 0 && x <= max_repeat).collect()
+    values.into_iter().filter(|&q| q > 0 && q <= max_repeat && q % bundle_size == 0).collect()
 }
 
 fn max_pattern_repeat(candidate: &Candidate, remaining: &[u32]) -> u32 {
@@ -691,6 +667,12 @@ fn final_objective_score(state: &State, lengths: &[u32], stock_length: u32, bund
         + estimated_secondary_bars as i64 * 100_000_000
         + waste as i64 * 10_000
         + non_bundle_primary_qty as i64
+}
+
+fn score_partial_progress(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
+    // Kept for compatibility/debug use. The solver now uses final_objective_score
+    // when updating best_state.
+    final_objective_score(state, lengths, stock_length, 1)
 }
 
 fn build_result(
