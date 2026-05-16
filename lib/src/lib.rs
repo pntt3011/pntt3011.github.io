@@ -82,7 +82,7 @@ pub fn compute_cutting_plan(
         pool_state.insert(length, (0, 0));
     }
 
-    let mut new_patterns_map: HashMap<(Vec<String>, bool), Pattern> = HashMap::new();
+    let mut final_patterns: Vec<Pattern> = Vec::new();
 
     for pattern in result.patterns {
         for _ in 0..pattern.qty {
@@ -113,28 +113,26 @@ pub fn compute_cutting_plan(
                 }
             }
             
-            let key = (new_cuts.clone(), pattern.is_fallback);
-            new_patterns_map.entry(key)
-                .and_modify(|p| p.qty += 1)
-                .or_insert(Pattern {
+            let mut found = false;
+            for p in final_patterns.iter_mut().rev() {
+                if p.cuts == new_cuts && p.is_fallback == pattern.is_fallback {
+                    p.qty += 1;
+                    found = true;
+                    break;
+                }
+            }
+            
+            if !found {
+                final_patterns.push(Pattern {
                     cuts: new_cuts,
                     qty: 1,
                     used_length: pattern.used_length,
                     waste: pattern.waste,
                     is_fallback: pattern.is_fallback,
                 });
+            }
         }
     }
-
-    let mut final_patterns: Vec<Pattern> = new_patterns_map.into_values().collect();
-    final_patterns.sort_by_key(|p| {
-        (
-            p.is_fallback,
-            std::cmp::Reverse(p.qty),
-            p.waste,
-            std::cmp::Reverse(p.used_length),
-        )
-    });
 
     result.patterns = final_patterns;
 
