@@ -8,7 +8,7 @@ use wasm_bindgen::prelude::*;
 const MAX_ITEMS: usize = 32;
 const MAX_CANDIDATES: usize = 320;
 const MAX_STATES: usize = 256;
-const MAX_SELECTED_PATTERNS: usize = 10;
+const MAX_SELECTED_PATTERNS: usize = 32;
 const MAX_RANDOM_GREEDY: usize = 32;
 const MIN_FILL_PERCENT: u32 = 50;
 
@@ -204,10 +204,27 @@ pub fn compute_with_fallback(
         remaining[i] = primary.remaining[i];
     }
 
-    let fallback_bars = best_fit_fallback_low(&lengths, &remaining, n, stock_length);
+    let mut fallback_bars = best_fit_fallback_low(&lengths, &remaining, n, stock_length);
+
+    // Hard safety rule: final produced quantity must be >= original demand for every length.
+    // This protects against any heuristic/selection-cap edge case. If the primary solution
+    // claims remaining is zero but the rebuilt selected pattern list does not actually
+    // produce enough, we repair the shortage with fallback bars instead of returning an
+    // invalid cutting plan.
+    repair_shortage_with_fallback(
+        &primary,
+        &mut fallback_bars,
+        &candidates,
+        candidate_count,
+        &lengths,
+        &demand,
+        n,
+        stock_length,
+    );
+
     let used_fallback = fallback_bars.iter().any(|b| b.used > 0);
 
-    Ok(build_result_low(
+    let result = build_result_low(
         primary,
         fallback_bars,
         &lengths,
@@ -218,7 +235,80 @@ pub fn compute_with_fallback(
         used_fallback,
         &candidates,
         candidate_count,
-    ))
+    );
+
+    debug_assert!(result_covers_demand(&result, items));
+    Ok(result)
+}
+
+
+fn repair_shortage_with_fallback(
+    primary: &SearchState,
+    fallback_bars: &mut Vec<Candidate>,
+    candidates: &[Candidate; MAX_CANDIDATES],
+    candidate_count: usize,
+    lengths: &[u32; MAX_ITEMS],
+    demand: &[u32; MAX_ITEMS],
+    n: usize,
+    stock_length: u32,
+) {
+    let mut produced = [0u32; MAX_ITEMS];
+
+    for s in 0..primary.selected_len {
+        let sel = primary.selected[s];
+        let idx = sel.candidate_index as usize;
+        if idx >= candidate_count { continue; }
+        let cand = candidates[idx];
+        for i in 0..n {
+            produced[i] = produced[i].saturating_add((cand.counts[i] as u32).saturating_mul(sel.qty));
+        }
+    }
+
+    for cand in fallback_bars.iter() {
+        for i in 0..n {
+            produced[i] = produced[i].saturating_add(cand.counts[i] as u32);
+        }
+    }
+
+    let mut shortage = [0u32; MAX_ITEMS];
+    let mut has_shortage = false;
+    for i in 0..n {
+        if produced[i] < demand[i] {
+            shortage[i] = demand[i] - produced[i];
+            has_shortage = true;
+        }
+    }
+
+    if has_shortage {
+        let repair = best_fit_fallback_low(lengths, &shortage, n, stock_length);
+        for b in repair {
+            if b.used > 0 { fallback_bars.push(b); }
+        }
+    }
+}
+
+fn result_covers_demand(result: &CuttingResult, items: &[Item]) -> bool {
+    // Debug-only helper. Labels may be original labels, so parse the length from each cut.
+    let mut required: HashMap<u32, u32> = HashMap::new();
+    for item in items {
+        *required.entry(item.length).or_insert(0) += item.qty;
+    }
+
+    let mut produced: HashMap<u32, u32> = HashMap::new();
+    for p in &result.patterns {
+        for cut in &p.cuts {
+            if let Some(length) = extract_length_from_cut(cut) {
+                *produced.entry(length).or_insert(0) += p.qty;
+            }
+        }
+    }
+
+    for (length, qty) in required {
+        if produced.get(&length).copied().unwrap_or(0) < qty {
+            return false;
+        }
+    }
+    true
 }
 
 fn solve_single_length_primary(
@@ -463,7 +553,7 @@ fn solve_quantity_low(
                     let mut ns = state;
                     if !apply_candidate_with_overcut(&mut ns.remaining, &mut ns.overcut, demand, &cand, q, n) { continue; }
                     ns.stock_qty = ns.stock_qty.saturating_add(q);
-                    add_selected(&mut ns, c_idx, q);
+                    if !add_selected(&mut ns, c_idx, q) { continue; }
                     ns.key = state_key(&ns.remaining, &ns.overcut, n);
                     ns.score = final_score(&ns, lengths, n, stock_length);
 
@@ -515,7 +605,7 @@ fn greedy_quantity_solution(
         if q == 0 { continue; }
         apply_candidate_with_overcut(&mut state.remaining, &mut state.overcut, demand, &cand, q, n);
         state.stock_qty += q;
-        add_selected(&mut state, c_idx, q);
+        if !add_selected(&mut state, c_idx, q) { break; }
         if all_done(&state.remaining, n) { break; }
     }
 
@@ -600,7 +690,7 @@ fn solve_simple_cover_low(
             break;
         }
         state.stock_qty = state.stock_qty.saturating_add(q);
-        add_selected(&mut state, c_idx, q);
+        if !add_selected(&mut state, c_idx, q) { break; }
     }
 
     state.key = state_key(&state.remaining, &state.overcut, n);
@@ -981,17 +1071,21 @@ fn subtract_candidate(remaining: &mut [u32; MAX_ITEMS], cand: &Candidate, q: u32
     true
 }
 
-fn add_selected(state: &mut SearchState, c_idx: usize, qty: u32) {
+fn add_selected(state: &mut SearchState, c_idx: usize, qty: u32) -> bool {
     for i in 0..state.selected_len {
         if state.selected[i].candidate_index as usize == c_idx {
-            state.selected[i].qty += qty;
-            return;
+            state.selected[i].qty = state.selected[i].qty.saturating_add(qty);
+            return true;
         }
     }
-    if state.selected_len < MAX_SELECTED_PATTERNS {
-        state.selected[state.selected_len] = SelectedPattern { candidate_index: c_idx as u16, qty };
-        state.selected_len += 1;
+
+    if state.selected_len >= MAX_SELECTED_PATTERNS {
+        return false;
     }
+
+    state.selected[state.selected_len] = SelectedPattern { candidate_index: c_idx as u16, qty };
+    state.selected_len += 1;
+    true
 }
 
 fn push_state_dedup(states: &mut [SearchState; MAX_STATES], count: &mut usize, state: SearchState, n: usize) {
