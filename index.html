@@ -27,16 +27,28 @@
             <h2 class="section-title">Material</h2>
             <div class="material-row">
                 <label>
-                    <span>Box length</span>
-                    <select id="lengthOfBoxCm"></select>
-                </label>
-                <label>
-                    <span>Box width</span>
-                    <select id="widthOfBoxCm"></select>
+                    <span>Order name</span>
+                    <select id="orderNameMaterialSelect">
+                        <option value="">Select Order…</option>
+                    </select>
                 </label>
                 <label>
                     <span>Stock length</span>
                     <input id="materialLengthCm" type="number" min="1" step="1" value="6000" />
+                </label>
+            </div>
+            <div class="material-row">
+                <label>
+                    <span>Box length</span>
+                    <select id="lengthOfBoxCm" disabled>
+                        <option value="">…</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Box width</span>
+                    <select id="widthOfBoxCm" disabled>
+                        <option value="">…</option>
+                    </select>
                 </label>
                 <label>
                     <span>Bundle size</span>
@@ -55,9 +67,6 @@
                     <thead>
                         <tr>
                             <th>#</th>
-                            <th>Order</th>
-                            <th>Component</th>
-                            <th>Part</th>
                             <th>Length (mm)</th>
                             <th>QTY</th>
                             <th></th>
@@ -68,23 +77,15 @@
                         <tr class="add-row" id="addRow">
                             <td></td>
                             <td>
-                                <select id="orderSelect" class="inline-select">
-                                    <option value="">Order…</option>
+                                <select id="lengthSelect" class="inline-select" disabled>
+                                    <option value="">Length…</option>
                                 </select>
                             </td>
                             <td>
-                                <select id="parentSelect" class="inline-select" disabled>
-                                    <option value="">Component…</option>
-                                </select>
+                                <input id="addRowQtyInput" type="number" class="qty-input" min="1" step="1" disabled />
                             </td>
                             <td>
-                                <select id="componentSelect" class="inline-select" disabled>
-                                    <option value="">Part…</option>
-                                </select>
-                            </td>
-                            <td><span id="addRowLength" class="add-row-preview">—</span></td>
-                            <td><span id="addRowQty" class="add-row-preview">—</span></td>
-                            <td>
+                                <button id="addComponentButton" type="button" class="primary-button inline-btn" disabled>Add</button>
                                 <button id="resetSelectionButton" type="button" class="clear-btn"
                                     title="Clear selection">✕</button>
                             </td>
@@ -113,9 +114,6 @@
     <template id="selectedRowTemplate">
         <tr>
             <td class="row-num-cell"></td>
-            <td class="order-cell"></td>
-            <td class="component-cell"></td>
-            <td class="part-cell"></td>
             <td class="length-cell"></td>
             <td>
                 <input class="qty-input" type="number" min="1" step="1" />

@@ -22,16 +22,15 @@ async function boot() {
     elements = {
         datasetStatus: document.getElementById("datasetStatus"),
         matchCount: document.getElementById("matchCount"),
+        orderNameMaterialSelect: document.getElementById("orderNameMaterialSelect"),
         lengthOfBoxCm: document.getElementById("lengthOfBoxCm"),
         widthOfBoxCm: document.getElementById("widthOfBoxCm"),
         materialLengthCm: document.getElementById("materialLengthCm"),
         bundleSize: document.getElementById("bundleSize"),
-        orderSelect: document.getElementById("orderSelect"),
-        parentSelect: document.getElementById("parentSelect"),
-        componentSelect: document.getElementById("componentSelect"),
+        lengthSelect: document.getElementById("lengthSelect"),
+        addRowQtyInput: document.getElementById("addRowQtyInput"),
+        addComponentButton: document.getElementById("addComponentButton"),
         resetSelectionButton: document.getElementById("resetSelectionButton"),
-        addRowLength: document.getElementById("addRowLength"),
-        addRowQty: document.getElementById("addRowQty"),
         selectedListBody: document.getElementById("selectedListBody"),
         calculateButton: document.getElementById("calculateButton"),
         resultList: document.getElementById("resultList"),
@@ -74,6 +73,12 @@ async function loadWasm() {
 
 /* ── Events ── */
 function bindEvents() {
+    elements.orderNameMaterialSelect.addEventListener("change", () => {
+        refreshSelectors();
+        populateAllMatchingComponents();
+        renderResults([]);
+    });
+
     // Material selects
     [elements.lengthOfBoxCm, elements.widthOfBoxCm].forEach((el) => {
         el.addEventListener("change", () => {
@@ -83,27 +88,13 @@ function bindEvents() {
         });
     });
 
-    // Order → sync parents
-    elements.orderSelect.addEventListener("change", () => {
-        syncParents();
-        syncPreview();
+    elements.lengthSelect.addEventListener("change", () => {
+        syncAddRow();
     });
 
-    // Component (parent) → sync parts
-    elements.parentSelect.addEventListener("change", () => {
-        syncComponents();
-        syncPreview();
+    elements.addComponentButton.addEventListener("click", () => {
+        addSelectedLength();
     });
-
-    // Part select → add immediately
-    elements.componentSelect.addEventListener("change", () => {
-        syncPreview();
-        if (elements.componentSelect.value) {
-            addSelectedComponent();
-        }
-    });
-
-
 
     // Reset picker
     elements.resetSelectionButton.addEventListener("click", () => {
@@ -125,12 +116,8 @@ async function loadData() {
     state.records = await response.json();
     if (!Array.isArray(state.records)) throw new Error("cutting_components.json must contain an array");
 
-    const lengths = unique(state.records.map(r => Number(r.lengthOfBoxCm)));
-    const widths = unique(state.records.map(r => Number(r.widthOfBoxCm)));
-
-    setOptions(elements.lengthOfBoxCm, lengths.map(v => option(String(v), String(v))));
-    setOptions(elements.widthOfBoxCm, widths.map(v => option(String(v), String(v))));
-
+    const orders = uniqueSorted(state.records.map(r => r.order_name));
+    setOptions(elements.orderNameMaterialSelect, [option("Select Order…", ""), ...orders.map(v => option(v, v))]);
 }
 
 /* ── Status ── */
@@ -141,20 +128,40 @@ function setStatus(kind, text) {
 
 /* ── Cascade selects ── */
 function refreshSelectors() {
+    const orderName = elements.orderNameMaterialSelect.value;
     const length = numberValue(elements.lengthOfBoxCm);
     const width = numberValue(elements.widthOfBoxCm);
 
-    // Length always shows all options from records
-    const allLengths = unique(state.records.map(r => Number(r.lengthOfBoxCm)));
-    setOptions(elements.lengthOfBoxCm, allLengths.map(v => option(String(v), String(v))));
-    if (length != null && allLengths.includes(length)) elements.lengthOfBoxCm.value = String(length);
+    if (!orderName) {
+        setOptions(elements.lengthOfBoxCm, [option("…", "")], true);
+        setOptions(elements.widthOfBoxCm, [option("…", "")], true);
+        state.filteredRecords = [];
+        updateMatchCount();
+        syncAddRowOptions();
+        return;
+    }
 
-    // Width is filtered by selected length
-    if (length != null) {
+    const orderRecords = state.records.filter(r => r.order_name === orderName);
+
+    // Length is filtered by order
+    const availableLengths = unique(orderRecords.map(r => Number(r.lengthOfBoxCm)));
+    setOptions(elements.lengthOfBoxCm, availableLengths.map(v => option(String(v), String(v))), false);
+
+    // Preserve selected length if still valid, otherwise default to first available
+    if (length != null && availableLengths.includes(length)) {
+        elements.lengthOfBoxCm.value = String(length);
+    } else if (availableLengths.length > 0) {
+        elements.lengthOfBoxCm.value = String(availableLengths[0]);
+    }
+
+    const newLength = numberValue(elements.lengthOfBoxCm);
+
+    // Width is filtered by order + length
+    if (newLength != null) {
         const availableWidths = unique(
-            state.records.filter(r => Number(r.lengthOfBoxCm) === length).map(r => Number(r.widthOfBoxCm))
+            orderRecords.filter(r => Number(r.lengthOfBoxCm) === newLength).map(r => Number(r.widthOfBoxCm))
         );
-        setOptions(elements.widthOfBoxCm, availableWidths.map(v => option(String(v), String(v))));
+        setOptions(elements.widthOfBoxCm, availableWidths.map(v => option(String(v), String(v))), false);
 
         // Preserve selected width if still valid, otherwise default to first available
         if (width != null && availableWidths.includes(width)) {
@@ -162,142 +169,100 @@ function refreshSelectors() {
         } else if (availableWidths.length > 0) {
             elements.widthOfBoxCm.value = String(availableWidths[0]);
         }
+    } else {
+        setOptions(elements.widthOfBoxCm, [option("…", "")], true);
     }
 
     // Recompute filtered records
-    const l = numberValue(elements.lengthOfBoxCm);
-    const w = numberValue(elements.widthOfBoxCm);
-    if (l != null && w != null) {
-        state.filteredRecords = state.records.filter(r =>
-            Number(r.lengthOfBoxCm) === l && Number(r.widthOfBoxCm) === w
+    const finalL = numberValue(elements.lengthOfBoxCm);
+    const finalW = numberValue(elements.widthOfBoxCm);
+    
+    if (orderName && finalL != null && finalW != null) {
+        state.filteredRecords = orderRecords.filter(r =>
+            Number(r.lengthOfBoxCm) === finalL && Number(r.widthOfBoxCm) === finalW
         );
     } else {
         state.filteredRecords = [];
     }
 
     updateMatchCount();
-    populateOrders();
-    syncParents();
-    syncComponents();
+    syncAddRowOptions();
 }
 
 function updateMatchCount() {
-    const l = numberValue(elements.lengthOfBoxCm);
-    const w = numberValue(elements.widthOfBoxCm);
-    const count = (l != null && w != null) ? state.filteredRecords.length : state.records.length;
+    const count = state.filteredRecords.length;
     elements.matchCount.textContent = `${count} matching components`;
 }
 
-function resetPickerOptions() {
-    // Only reset Component and Part — Order stays populated
-    setOptions(elements.parentSelect, [option("Component…", "")], true);
-    setOptions(elements.componentSelect, [option("Part…", "")], true);
-}
+function syncAddRowOptions() {
+    if (state.filteredRecords.length === 0) {
+        setOptions(elements.lengthSelect, [option("Length…", "")], true);
+        elements.addRowQtyInput.value = "";
+        elements.addRowQtyInput.disabled = true;
+        elements.addComponentButton.disabled = true;
+        return;
+    }
 
-function populateOrders() {
-    const currentOrder = elements.orderSelect.value;
-    const orders = uniqueSorted(state.filteredRecords.map(r => r.order_name));
-    setOptions(elements.orderSelect, [option("Order…", ""), ...orders.map(v => option(v, v))]);
-    elements.orderSelect.disabled = orders.length === 0;
-
-    if (currentOrder && orders.includes(currentOrder)) {
-        elements.orderSelect.value = currentOrder;
+    const lengths = unique(state.filteredRecords.map(r => Number(r.lengthOfDetailCm)));
+    setOptions(elements.lengthSelect, [option("Length…", ""), ...lengths.map(v => option(String(v), String(v)))], false);
+    
+    // Auto-select if only 1
+    if (lengths.length === 1) {
+        elements.lengthSelect.value = String(lengths[0]);
     } else {
-        elements.orderSelect.value = "";
+        elements.lengthSelect.value = "";
     }
+    syncAddRow();
 }
 
-function syncParents() {
-    const orderName = elements.orderSelect.value;
-    if (!orderName) {
-        setOptions(elements.parentSelect, [option("Choose a component", "")], true);
-        setOptions(elements.componentSelect, [option("Choose a part", "")], true);
+function syncAddRow() {
+    const len = numberValue(elements.lengthSelect);
+    if (len == null) {
+        elements.addRowQtyInput.value = "";
+        elements.addRowQtyInput.disabled = true;
+        elements.addComponentButton.disabled = true;
         return;
     }
-    const parents = uniqueSorted(
-        state.filteredRecords.filter(r => r.order_name === orderName).map(r => r.parent_component_name)
-    );
-    setOptions(elements.parentSelect, [option("Choose a component", ""), ...parents.map(v => option(v, v))]);
-    elements.parentSelect.disabled = false;
-    if (!parents.includes(elements.parentSelect.value)) elements.parentSelect.value = "";
-    syncComponents();
-}
 
-function syncComponents() {
-    const orderName = elements.orderSelect.value;
-    const parentName = elements.parentSelect.value;
-    if (!orderName || !parentName) {
-        setOptions(elements.componentSelect, [option("Choose a part", "")], true);
-        return;
+    let sumQty = 0;
+    for (const r of state.filteredRecords) {
+        if (Number(r.lengthOfDetailCm) === len) {
+            sumQty += Number(r.qty_needed);
+        }
     }
-    const components = uniqueSorted(
-        state.filteredRecords
-            .filter(r => r.order_name === orderName && r.parent_component_name === parentName)
-            .map(r => r.component_name)
-    );
-    setOptions(elements.componentSelect, [option("Choose a part", ""), ...components.map(v => option(v, v))]);
-    elements.componentSelect.disabled = false;
-    if (!components.includes(elements.componentSelect.value)) elements.componentSelect.value = "";
-}
 
-function syncPreview() {
-    const record = getSelectedRecord();
-    if (!record) {
-        elements.addRowLength.textContent = '—';
-        elements.addRowQty.textContent = '—';
-        return;
-    }
-    elements.addRowLength.textContent = String(record.lengthOfDetailCm);
-    elements.addRowQty.textContent = String(record.qty_needed);
+    elements.addRowQtyInput.value = String(sumQty);
+    elements.addRowQtyInput.disabled = false;
+    elements.addComponentButton.disabled = false;
 }
 
 function resetPicker() {
-    elements.orderSelect.value = "";   // deselect, but keep options
-    resetPickerOptions();              // clears Component + Part only
-    syncPreview();
+    elements.lengthSelect.value = "";
+    syncAddRow();
 }
 
-/* ── Get selected record ── */
-function getSelectedRecord() {
-    const orderName = elements.orderSelect.value;
-    const parentName = elements.parentSelect.value;
-    const componentName = elements.componentSelect.value;
-    if (!orderName || !parentName || !componentName) return null;
-    return state.filteredRecords.find(r =>
-        r.order_name === orderName &&
-        r.parent_component_name === parentName &&
-        r.component_name === componentName
-    ) ?? null;
-}
+function addSelectedLength() {
+    const len = numberValue(elements.lengthSelect);
+    const qty = numberValue(elements.addRowQtyInput);
+    if (len == null || qty == null || qty < 1) return;
 
-/* ── Add selected component (triggered by + button) ── */
-function addSelectedComponent() {
-    const record = getSelectedRecord();
-    if (!record) return;
-
-    const key = componentKey(record);
+    const key = String(len);
     if (state.selectedRows.some(row => row.key === key)) {
         highlightRow(key);
-        // Reset Part picker so user can pick next
-        elements.componentSelect.value = "";
-        setOptions(elements.componentSelect, [option("Part…", "")], true);
-        syncPreview();
+        resetPicker();
         return;
     }
 
     state.selectedRows.push({
         key,
-        order_name: record.order_name,
-        parent_component_name: record.parent_component_name,
-        component_name: record.component_name,
-        lengthOfDetailCm: Number(record.lengthOfDetailCm),
-        qty_needed: Number(record.qty_needed),
+        lengthOfDetailCm: len,
+        qty_needed: qty,
     });
+
+    state.selectedRows.sort((a, b) => b.lengthOfDetailCm - a.lengthOfDetailCm);
 
     renderSelectedRows();
     updateCalculateState();
-
-    // Auto-reset picker so user can start next selection immediately
     resetPicker();
 }
 
@@ -326,9 +291,6 @@ function renderSelectedRows() {
         tr.dataset.key = row.key;
 
         fragment.querySelector(".row-num-cell").textContent = String(index + 1);
-        fragment.querySelector(".order-cell").textContent = row.order_name;
-        fragment.querySelector(".component-cell").textContent = row.parent_component_name;
-        fragment.querySelector(".part-cell").textContent = row.component_name;
         fragment.querySelector(".length-cell").textContent = String(row.lengthOfDetailCm);
 
         const qtyInput = fragment.querySelector(".qty-input");
@@ -364,7 +326,7 @@ async function calculate() {
     if (!state.computeCuttingPlan || stockLength == null || state.selectedRows.length === 0) return;
 
     const items = state.selectedRows.map(row => ({
-        label: `${row.order_name} / ${row.parent_component_name} / ${row.component_name}`,
+        label: `${row.lengthOfDetailCm}mm`,
         length: row.lengthOfDetailCm,
         qty: row.qty_needed,
     }));
@@ -444,22 +406,24 @@ function renderResults(result, stockLength = 0) {
 }
 
 function populateAllMatchingComponents() {
-    state.selectedRows = state.filteredRecords.map(record => ({
-        key: componentKey(record),
-        order_name: record.order_name,
-        parent_component_name: record.parent_component_name,
-        component_name: record.component_name,
-        lengthOfDetailCm: Number(record.lengthOfDetailCm),
-        qty_needed: Number(record.qty_needed),
-    }));
+    const grouped = {};
+    for (const record of state.filteredRecords) {
+        const len = Number(record.lengthOfDetailCm);
+        const qty = Number(record.qty_needed);
+        grouped[len] = (grouped[len] || 0) + qty;
+    }
+    
+    state.selectedRows = Object.keys(grouped).map(len => ({
+        key: String(len),
+        lengthOfDetailCm: Number(len),
+        qty_needed: grouped[len],
+    })).sort((a, b) => b.lengthOfDetailCm - a.lengthOfDetailCm);
+    
     renderSelectedRows();
     updateCalculateState();
 }
 
 /* ── Utilities ── */
-function componentKey(record) {
-    return [record.order_name, record.parent_component_name, record.component_name, record.lengthOfDetailCm].join("|");
-}
 
 function option(label, value) {
     const el = document.createElement("option");
