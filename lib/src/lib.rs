@@ -461,26 +461,23 @@ fn add_or_merge_pattern(selected: &mut Vec<(Candidate, u32)>, candidate: Candida
     selected.push((candidate, qty));
 }
 
+fn estimate_secondary_bars_bfd(
+    lengths: &[u32],
+    remaining: &[u32],
+    stock_length: u32,
+) -> u32 {
+    if remaining.iter().all(|&q| q == 0) {
+        return 0;
+    }
+
+    best_fit_fallback(lengths, remaining, stock_length).len() as u32
+}
+
 fn score_state(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
-    let remaining_length: u32 = lengths
-        .iter()
-        .zip(state.remaining.iter())
-        .map(|(l, q)| l * q)
-        .sum();
+    let estimated_secondary_bars =
+        estimate_secondary_bars_bfd(lengths, &state.remaining, stock_length);
 
-    let remaining_items: u32 = state.remaining.iter().sum();
-
-    let remaining_kinds: u32 = state
-        .remaining
-        .iter()
-        .filter(|&&q| q > 0)
-        .count() as u32;
-
-    let estimated_fallback_bars = if remaining_length == 0 {
-        0
-    } else {
-        (remaining_length + stock_length - 1) / stock_length
-    };
+    let estimated_total_bars = state.stock_qty + estimated_secondary_bars;
 
     let selected_used: u32 = state
         .selected
@@ -491,57 +488,51 @@ fn score_state(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
     let selected_stock = state.stock_qty * stock_length;
     let selected_waste = selected_stock.saturating_sub(selected_used);
 
-    let primary_pattern_count = state.selected.len() as u32;
-
-    // Penalize long remaining components more strongly.
-    let long_remaining_penalty: u32 = lengths
-        .iter()
-        .zip(state.remaining.iter())
-        .map(|(l, q)| l * q)
-        .sum();
-
-    // Practical factory objective:
-    //
-    // 1. Use fewer total bars.
-    // 2. Leave less work for fallback.
-    // 3. Reduce number of secondary item types.
-    // 4. Reduce waste.
-    // 5. Finish long parts early.
-    // 6. Keep primary pattern count simple.
-    state.stock_qty as i64 * 1_000_000
-        + estimated_fallback_bars as i64 * 500_000
-        + remaining_kinds as i64 * 100_000
-        + remaining_items as i64 * 10_000
-        + selected_waste as i64 * 100
-        + long_remaining_penalty as i64 * 10
-        + primary_pattern_count as i64 * 1_000
-}
-
-fn score_partial_progress(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
     let remaining_length: u32 = lengths
         .iter()
         .zip(state.remaining.iter())
         .map(|(l, q)| l * q)
         .sum();
 
-    let remaining_items: u32 = state.remaining.iter().sum();
+    let estimated_secondary_stock = estimated_secondary_bars * stock_length;
+    let estimated_secondary_waste = estimated_secondary_stock.saturating_sub(remaining_length);
 
-    let remaining_kinds: u32 = state
-        .remaining
+    let estimated_total_waste = selected_waste + estimated_secondary_waste;
+
+    let long_remaining_penalty: u32 = lengths
         .iter()
-        .filter(|&&q| q > 0)
-        .count() as u32;
+        .zip(state.remaining.iter())
+        .map(|(l, q)| l * q)
+        .sum();
 
-    let estimated_fallback_bars = if remaining_length == 0 {
-        0
-    } else {
-        (remaining_length + stock_length - 1) / stock_length
-    };
+    let primary_pattern_count = state.selected.len() as u32;
 
-    estimated_fallback_bars as i64 * 1_000_000
-        + remaining_kinds as i64 * 100_000
-        + remaining_items as i64 * 10_000
-        + remaining_length as i64
+    estimated_total_bars as i64 * 100_000_000
+        + estimated_secondary_bars as i64 * 10_000_000
+        + estimated_total_waste as i64 * 10_000
+        + long_remaining_penalty as i64 * 100
+        + primary_pattern_count as i64 * 1_000
+}
+
+fn score_partial_progress(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
+    let estimated_secondary_bars =
+        estimate_secondary_bars_bfd(lengths, &state.remaining, stock_length);
+
+    let estimated_total_bars = state.stock_qty + estimated_secondary_bars;
+
+    let remaining_length: u32 = lengths
+        .iter()
+        .zip(state.remaining.iter())
+        .map(|(l, q)| l * q)
+        .sum();
+
+    let estimated_secondary_stock = estimated_secondary_bars * stock_length;
+    let estimated_secondary_waste = estimated_secondary_stock.saturating_sub(remaining_length);
+
+    estimated_total_bars as i64 * 100_000_000
+        + estimated_secondary_bars as i64 * 10_000_000
+        + estimated_secondary_waste as i64 * 10_000
+        + remaining_length as i64 * 100
 }
 
 fn build_result(
