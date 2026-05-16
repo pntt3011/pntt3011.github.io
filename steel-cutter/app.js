@@ -1,4 +1,4 @@
-import initWasm, { compute_cutting_plan } from './lib/pkg/steel_cutting_wasm.js';
+import initWasm, { compute_cutting_plan_numeric } from './lib/pkg/steel_cutting_wasm.js';
 
 
 
@@ -67,7 +67,7 @@ async function init() {
 
 async function loadWasm() {
     await initWasm();
-    state.computeCuttingPlan = compute_cutting_plan;
+    state.computeCuttingPlan = compute_cutting_plan_numeric;
     state.wasmReady = true;
 }
 
@@ -325,16 +325,20 @@ async function calculate() {
     const bundleSize = numberValue(elements.bundleSize) || 10;
     if (!state.computeCuttingPlan || stockLength == null || state.selectedRows.length === 0) return;
 
-    const items = state.selectedRows.map(row => ({
-        label: `${row.lengthOfDetailCm}mm`,
-        length: row.lengthOfDetailCm,
-        qty: row.qty_needed,
-    }));
+    const input = {
+        lengths: state.selectedRows.map(row => row.lengthOfDetailCm),
+        quantities: state.selectedRows.map(row => row.qty_needed),
+        stock_length: stockLength,
+        bundle_size: bundleSize
+    };
 
-    const result = state.computeCuttingPlan(items, stockLength, bundleSize);
-
-
-    renderResults(result, stockLength);
+    try {
+        const result = state.computeCuttingPlan(input);
+        renderResults(result, stockLength);
+    } catch (err) {
+        console.error(err);
+        elements.resultList.innerHTML = `<p class="meta-line status-pill--error">Error: ${err}</p>`;
+    }
 }
 
 /* ── Render results ── */
@@ -347,7 +351,7 @@ function renderResults(result, stockLength = 0) {
     elements.resultList.innerHTML = "";
     const fragment = elements.resultCardTemplate.content.cloneNode(true);
 
-    fragment.querySelector("h3").textContent = result.used_fallback ? "Recommended plan (fallback)" : "Recommended plan";
+    fragment.querySelector("h3").textContent = "Recommended plan";
 
     // Summary calculation
     let totalBars = 0;
@@ -374,21 +378,22 @@ function renderResults(result, stockLength = 0) {
         // Pattern Header: "Pattern 1 × 198"
         const header = document.createElement("div");
         header.className = "pattern-header";
-        const secondarySuffix = pattern.is_fallback ? ' <small>(secondary)</small>' : '';
+        const secondarySuffix = pattern.is_secondary ? ' <small>(secondary)</small>' : '';
         header.innerHTML = `<strong>Pattern ${patternIndex++}${secondarySuffix}</strong> <span class="pattern-qty">× ${pattern.qty}</span>`;
         item.appendChild(header);
 
-        // Group components in this pattern by label
-        const counts = {};
-        pattern.cuts.forEach(label => counts[label] = (counts[label] || 0) + 1);
-
         const subList = document.createElement("ul");
         subList.className = "pattern-sublist";
-        Object.keys(counts).forEach(label => {
-            const li = document.createElement("li");
-            li.textContent = `${label} × ${counts[label]}`;
-            subList.appendChild(li);
+        
+        result.lengths.forEach((len, idx) => {
+            const count = pattern.counts[idx];
+            if (count > 0) {
+                const li = document.createElement("li");
+                li.textContent = `${len}mm × ${count}`;
+                subList.appendChild(li);
+            }
         });
+        
         item.appendChild(subList);
 
         // Footer: Waste and Length info
