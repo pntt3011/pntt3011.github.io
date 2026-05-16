@@ -139,17 +139,6 @@ pub fn compute_cutting_plan(
         .map_err(|e| JsValue::from_str(&format!("Failed to serialize result: {}", e)))
 }
 
-/// Computes a steel cutting plan.
-///
-/// Main behavior:
-/// - Primary phase uses up to `max_primary_patterns`.
-/// - Primary pattern quantities are aligned to `bundle_size`.
-/// - Pattern generation prioritizes largest-to-shortest greedy cutting.
-/// - Remaining demand is completed by fallback Best-Fit Decreasing.
-///
-/// `bundle_size = 60` means the main repeated patterns should consume
-/// quantities in multiples of 60 pieces.
-/// Remainders are handled as secondary/fallback patterns.
 pub fn compute_with_fallback(
     items: &[Item],
     stock_length: u32,
@@ -217,8 +206,8 @@ fn solve_primary_patterns(
 
     let mut best_state = beam[0].clone();
 
-    let beam_width = 300;
-    let candidates_per_state = 120;
+    let beam_width = 400;
+    let candidates_per_state = 140;
 
     loop {
         let mut next_states = Vec::new();
@@ -269,7 +258,13 @@ fn solve_primary_patterns(
         next_states.truncate(beam_width);
 
         for s in &next_states {
-            if score_partial_progress(s, lengths, stock_length) < score_partial_progress(&best_state, lengths, stock_length) {
+            // Keep the best partial state according to the real business objective:
+            // 1. lowest estimated total stock bars
+            // 2. lowest estimated secondary/manual bars
+            // 3. lowest estimated total waste
+            if final_objective_score(s, lengths, stock_length)
+                < final_objective_score(&best_state, lengths, stock_length)
+            {
                 best_state = s.clone();
             }
         }
@@ -540,69 +535,110 @@ fn add_or_merge_pattern(selected: &mut Vec<(Candidate, u32)>, candidate: Candida
     selected.push((candidate, qty));
 }
 
+fn remaining_length(lengths: &[u32], remaining: &[u32]) -> u32 {
+    lengths
+        .iter()
+        .zip(remaining.iter())
+        .map(|(l, q)| l * q)
+        .sum()
+}
+
+fn selected_used_length(state: &State) -> u32 {
+    state.selected.iter().map(|(p, q)| p.used * q).sum()
+}
+
+fn selected_waste(state: &State, stock_length: u32) -> u32 {
+    let selected_stock = state.stock_qty * stock_length;
+    selected_stock.saturating_sub(selected_used_length(state))
+}
+
+/// Cheap lower-bound estimate for secondary/manual bars.
+/// This is fast and useful during beam sorting, but it can underestimate
+/// when remaining lengths do not pack well together.
+fn estimate_secondary_bars_lower_bound(
+    lengths: &[u32],
+    remaining: &[u32],
+    stock_length: u32,
+) -> u32 {
+    let total = remaining_length(lengths, remaining);
+
+    if total == 0 {
+        0
+    } else {
+        (total + stock_length - 1) / stock_length
+    }
+}
+
+/// More realistic estimate of secondary/manual bars.
+/// It runs the same Best-Fit Decreasing fallback used by the final cleanup,
+/// then counts how many fallback bars would be required.
 fn estimate_secondary_bars_bfd(
     lengths: &[u32],
     remaining: &[u32],
     stock_length: u32,
 ) -> u32 {
-    let remaining_length: u32 = lengths
-        .iter()
-        .zip(remaining.iter())
-        .map(|(l, q)| l * q)
-        .sum();
-
-    if remaining_length == 0 {
+    if remaining.iter().all(|&q| q == 0) {
         0
     } else {
-        (remaining_length + stock_length - 1) / stock_length
+        best_fit_fallback(lengths, remaining, stock_length).len() as u32
     }
 }
 
+fn estimated_total_waste(
+    state: &State,
+    lengths: &[u32],
+    stock_length: u32,
+    estimated_secondary_bars: u32,
+) -> u32 {
+    let primary_waste = selected_waste(state, stock_length);
+    let rem_len = remaining_length(lengths, &state.remaining);
+    let secondary_stock = estimated_secondary_bars * stock_length;
+    let secondary_waste = secondary_stock.saturating_sub(rem_len);
+
+    primary_waste + secondary_waste
+}
+
+/// Soft score used for beam sorting.
+///
+/// It follows the target objective, but uses the cheap lower-bound secondary
+/// estimate so the search stays fast and does not get stuck too early.
 fn score_state(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
     let estimated_secondary_bars =
+        estimate_secondary_bars_lower_bound(lengths, &state.remaining, stock_length);
+    let estimated_total_bars = state.stock_qty + estimated_secondary_bars;
+    let estimated_waste =
+        estimated_total_waste(state, lengths, stock_length, estimated_secondary_bars);
+
+    // Objective priority during exploration:
+    // 1. lowest estimated total stock bars
+    // 2. lowest estimated secondary/manual bars
+    // 3. lowest estimated waste
+    estimated_total_bars as i64 * 1_000_000
+        + estimated_secondary_bars as i64 * 100_000
+        + estimated_waste as i64 * 1_000
+}
+
+/// Harder final objective used when remembering the best partial solution.
+///
+/// This uses the real fallback estimator, so the selected final state is closer
+/// to the business priority:
+/// 1. lowest stock bar qty
+/// 2. lowest secondary/manual bar qty
+/// 3. lowest waste
+fn final_objective_score(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
+    let estimated_secondary_bars =
         estimate_secondary_bars_bfd(lengths, &state.remaining, stock_length);
+    let estimated_total_bars = state.stock_qty + estimated_secondary_bars;
+    let estimated_waste =
+        estimated_total_waste(state, lengths, stock_length, estimated_secondary_bars);
 
-    let selected_used: u32 = state
-        .selected
-        .iter()
-        .map(|(p, q)| p.used * q)
-        .sum();
-
-    let selected_stock = state.stock_qty * stock_length;
-    let selected_waste = selected_stock.saturating_sub(selected_used);
-
-    let remaining_length: u32 = lengths
-        .iter()
-        .zip(state.remaining.iter())
-        .map(|(l, q)| l * q)
-        .sum();
-
-    let estimated_secondary_stock = estimated_secondary_bars * stock_length;
-    let estimated_secondary_waste = estimated_secondary_stock.saturating_sub(remaining_length);
-
-    let estimated_total_waste = selected_waste + estimated_secondary_waste;
-
-    state.stock_qty as i64 * 100_000_000
+    estimated_total_bars as i64 * 1_000_000_000
         + estimated_secondary_bars as i64 * 10_000_000
-        + estimated_total_waste as i64 * 10_000
+        + estimated_waste as i64 * 10_000
 }
 
 fn score_partial_progress(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
-    let estimated_secondary_bars =
-        estimate_secondary_bars_bfd(lengths, &state.remaining, stock_length);
-
-    let remaining_length: u32 = lengths
-        .iter()
-        .zip(state.remaining.iter())
-        .map(|(l, q)| l * q)
-        .sum();
-
-    let estimated_secondary_stock = estimated_secondary_bars * stock_length;
-    let estimated_secondary_waste = estimated_secondary_stock.saturating_sub(remaining_length);
-
-    state.stock_qty as i64 * 100_000_000
-        + estimated_secondary_bars as i64 * 10_000_000
-        + estimated_secondary_waste as i64 * 10_000
+    final_objective_score(state, lengths, stock_length)
 }
 
 fn build_result(
