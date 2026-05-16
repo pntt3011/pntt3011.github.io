@@ -50,8 +50,93 @@ pub fn compute_cutting_plan(
     let items: Vec<Item> = serde_wasm_bindgen::from_value(items)
         .map_err(|e| JsValue::from_str(&format!("Invalid items input: {}", e)))?;
 
-    let result = compute_with_fallback(&items, stock_length, max_primary_patterns, bundle_size)
+    // --- Pre-process: Group items by length ---
+    let mut length_to_items: std::collections::BTreeMap<u32, Vec<Item>> = std::collections::BTreeMap::new();
+    for item in &items {
+        length_to_items.entry(item.length).or_default().push(item.clone());
+    }
+
+    let mut grouped_items = Vec::new();
+    for (&length, group) in &length_to_items {
+        let total_qty: u32 = group.iter().map(|x| x.qty).sum();
+        grouped_items.push(Item {
+            label: format!("{}", length),
+            length,
+            qty: total_qty,
+        });
+    }
+    grouped_items.sort_by_key(|i| std::cmp::Reverse(i.length));
+
+    // --- Run solver on grouped items ---
+    let mut result = compute_with_fallback(&grouped_items, stock_length, max_primary_patterns, bundle_size)
         .map_err(|e| JsValue::from_str(&e))?;
+
+    // --- Post-process: Repopulate original labels ---
+    let mut pool: HashMap<u32, Vec<Item>> = HashMap::new();
+    for item in items {
+        pool.entry(item.length).or_default().push(item);
+    }
+    
+    let mut pool_state: HashMap<u32, (usize, u32)> = HashMap::new();
+    for &length in pool.keys() {
+        pool_state.insert(length, (0, 0));
+    }
+
+    let mut new_patterns_map: HashMap<(Vec<String>, bool), Pattern> = HashMap::new();
+
+    for pattern in result.patterns {
+        for _ in 0..pattern.qty {
+            let mut new_cuts = Vec::new();
+            for cut_str in &pattern.cuts {
+                let parts: Vec<&str> = cut_str.split(' ').collect();
+                let length: u32 = parts[0].parse().unwrap();
+                
+                let state = pool_state.get_mut(&length).unwrap();
+                let items_of_length = pool.get(&length).unwrap();
+                
+                let mut current_item_idx = state.0;
+                let mut used_from_current = state.1;
+                
+                while current_item_idx < items_of_length.len() && used_from_current >= items_of_length[current_item_idx].qty {
+                    current_item_idx += 1;
+                    used_from_current = 0;
+                }
+                
+                if current_item_idx < items_of_length.len() {
+                    let orig_item = &items_of_length[current_item_idx];
+                    new_cuts.push(format!("{} ({})", orig_item.label, length));
+                    used_from_current += 1;
+                    state.0 = current_item_idx;
+                    state.1 = used_from_current;
+                } else {
+                    new_cuts.push(cut_str.clone());
+                }
+            }
+            
+            let key = (new_cuts.clone(), pattern.is_fallback);
+            new_patterns_map.entry(key)
+                .and_modify(|p| p.qty += 1)
+                .or_insert(Pattern {
+                    cuts: new_cuts,
+                    qty: 1,
+                    used_length: pattern.used_length,
+                    waste: pattern.waste,
+                    is_fallback: pattern.is_fallback,
+                });
+        }
+    }
+
+    let mut final_patterns: Vec<Pattern> = new_patterns_map.into_values().collect();
+    final_patterns.sort_by_key(|p| {
+        (
+            p.is_fallback,
+            std::cmp::Reverse(p.qty),
+            p.waste,
+            std::cmp::Reverse(p.used_length),
+        )
+    });
+
+    result.patterns = final_patterns;
 
     serde_wasm_bindgen::to_value(&result)
         .map_err(|e| JsValue::from_str(&format!("Failed to serialize result: {}", e)))
