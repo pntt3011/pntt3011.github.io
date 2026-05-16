@@ -39,7 +39,7 @@ struct State {
     stock_qty: u32,
 }
 
-const MAX_PRIMARY_PATTERNS: usize = 5;
+const MAX_PRIMARY_PATTERNS: usize = 6;
 const BEAM_WIDTH: usize = 200;
 const CANDIDATES_PER_STATE: usize = 80;
 const RANDOM_CANDIDATE_COUNT: usize = 80;
@@ -233,9 +233,9 @@ fn solve_primary_patterns(
                     continue;
                 }
 
-                // bundle_size is intentionally NOT used here.
-                // bundle_size only splits full-bundle demand vs secondary remainder.
-                // A pattern may be repeated any practical number of times.
+                // Prefer full-bundle pattern repetitions first.
+                // Non-bundle quantities are still allowed as a fallback so
+                // the primary solver does not get stuck.
                 for q in trial_quantities(max_repeat, bundle_size) {
                     let mut new_remaining = state.remaining.clone();
 
@@ -266,8 +266,8 @@ fn solve_primary_patterns(
             best_by_remaining
                 .entry(state.remaining.clone())
                 .and_modify(|existing| {
-                    if score_state(&state, lengths, stock_length)
-                        < score_state(existing, lengths, stock_length)
+                    if score_state(&state, lengths, stock_length, bundle_size)
+                        < score_state(existing, lengths, stock_length, bundle_size)
                     {
                         *existing = state.clone();
                     }
@@ -276,12 +276,12 @@ fn solve_primary_patterns(
         }
 
         let mut deduped: Vec<State> = best_by_remaining.into_values().collect();
-        deduped.sort_by_key(|s| score_state(s, lengths, stock_length));
+        deduped.sort_by_key(|s| score_state(s, lengths, stock_length, bundle_size));
         deduped.truncate(BEAM_WIDTH);
 
         for s in &deduped {
-            if final_objective_score(s, lengths, stock_length)
-                < final_objective_score(&best_state, lengths, stock_length)
+            if final_objective_score(s, lengths, stock_length, bundle_size)
+                < final_objective_score(&best_state, lengths, stock_length, bundle_size)
             {
                 best_state = s.clone();
             }
@@ -482,8 +482,42 @@ fn best_fit_fallback(lengths: &[u32], remaining: &[u32], stock_length: u32) -> V
     bars
 }
 
-fn trial_quantities(max_repeat: u32, _bundle_size: u32) -> Vec<u32> {
-    let mut values = vec![max_repeat];
+fn trial_quantities(max_repeat: u32, bundle_size: u32) -> Vec<u32> {
+    let mut values = Vec::new();
+
+    // 1. Prefer quantities divisible by bundle_size.
+    // Example: bundle_size = 60, max_repeat = 881 -> try 840 first.
+    if bundle_size > 1 {
+        let max_full_bundle_qty = (max_repeat / bundle_size) * bundle_size;
+
+        if max_full_bundle_qty > 0 {
+            values.push(max_full_bundle_qty);
+            values.push(bundle_size);
+
+            let half = (max_full_bundle_qty / 2 / bundle_size) * bundle_size;
+            if half > 0 {
+                values.push(half);
+            }
+
+            if max_full_bundle_qty > bundle_size {
+                values.push(max_full_bundle_qty - bundle_size);
+            }
+
+            let one_third = (max_full_bundle_qty / 3 / bundle_size) * bundle_size;
+            if one_third > 0 {
+                values.push(one_third);
+            }
+
+            let two_third = ((max_full_bundle_qty * 2) / 3 / bundle_size) * bundle_size;
+            if two_third > 0 {
+                values.push(two_third);
+            }
+        }
+    }
+
+    // 2. Fallback: allow normal quantities so the solver can still find a plan
+    // when full-bundle repetitions are impossible or inefficient.
+    values.push(max_repeat);
 
     if max_repeat > 1 {
         values.push(1);
@@ -499,9 +533,15 @@ fn trial_quantities(max_repeat: u32, _bundle_size: u32) -> Vec<u32> {
         values.push((max_repeat * 2) / 3);
     }
 
-    values.sort();
+    values.sort_by_key(|&q| {
+        let non_bundle_penalty = if bundle_size > 1 { q % bundle_size } else { 0 };
+        (
+            non_bundle_penalty,
+            std::cmp::Reverse(q),
+        )
+    });
     values.dedup();
-    values.into_iter().filter(|&x| x > 0).collect()
+    values.into_iter().filter(|&x| x > 0 && x <= max_repeat).collect()
 }
 
 fn max_pattern_repeat(candidate: &Candidate, remaining: &[u32]) -> u32 {
@@ -604,7 +644,19 @@ fn estimated_total_waste(
     primary_waste + secondary_waste
 }
 
-fn score_state(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
+fn primary_non_bundle_qty(state: &State, bundle_size: u32) -> u32 {
+    if bundle_size <= 1 {
+        return 0;
+    }
+
+    state
+        .selected
+        .iter()
+        .map(|(_, qty)| qty % bundle_size)
+        .sum()
+}
+
+fn score_state(state: &State, lengths: &[u32], stock_length: u32, bundle_size: u32) -> i64 {
     // Fast, softer score for beam search. It avoids repeatedly running BFD
     // while still ranking by the real priority:
     // 1. lowest total stock bars
@@ -616,12 +668,15 @@ fn score_state(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
     let estimated_total_bars = state.stock_qty + estimated_secondary_bars;
     let waste = estimated_total_waste(state, lengths, stock_length, estimated_secondary_bars);
 
+    let non_bundle_primary_qty = primary_non_bundle_qty(state, bundle_size);
+
     estimated_total_bars as i64 * 1_000_000
         + estimated_secondary_bars as i64 * 100_000
         + waste as i64 * 100
+        + non_bundle_primary_qty as i64
 }
 
-fn final_objective_score(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
+fn final_objective_score(state: &State, lengths: &[u32], stock_length: u32, bundle_size: u32) -> i64 {
     // More accurate hard business objective used to choose best_state.
     // This uses actual Best-Fit Decreasing to estimate secondary/manual bars.
     let estimated_secondary_bars =
@@ -630,15 +685,18 @@ fn final_objective_score(state: &State, lengths: &[u32], stock_length: u32) -> i
     let estimated_total_bars = state.stock_qty + estimated_secondary_bars;
     let waste = estimated_total_waste(state, lengths, stock_length, estimated_secondary_bars);
 
+    let non_bundle_primary_qty = primary_non_bundle_qty(state, bundle_size);
+
     estimated_total_bars as i64 * 1_000_000_000
         + estimated_secondary_bars as i64 * 100_000_000
         + waste as i64 * 10_000
+        + non_bundle_primary_qty as i64
 }
 
 fn score_partial_progress(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
     // Kept for compatibility/debug use. The solver now uses final_objective_score
     // when updating best_state.
-    final_objective_score(state, lengths, stock_length)
+    final_objective_score(state, lengths, stock_length, 1)
 }
 
 fn build_result(
