@@ -190,7 +190,7 @@ fn solve_primary_patterns(
         next_states.truncate(beam_width);
 
         for s in &next_states {
-            if score_partial_progress(s, lengths) < score_partial_progress(&best_state, lengths) {
+            if score_partial_progress(s, lengths, stock_length) < score_partial_progress(&best_state, lengths, stock_length) {
                 best_state = s.clone();
             }
         }
