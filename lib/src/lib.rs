@@ -12,6 +12,13 @@ const MAX_SELECTED_PATTERNS: usize = 10;
 const MAX_RANDOM_GREEDY: usize = 48;
 const MIN_FILL_PERCENT: u32 = 50;
 
+// Overcut control. Extra produced pieces are allowed, but strongly penalized.
+// This helps match commercial optimizers that accept small overproduction to save bars/material.
+const ALLOW_OVERCUT: bool = true;
+const MAX_OVERCUT_PERCENT_PER_ITEM: u32 = 3;
+const MAX_OVERCUT_ABSOLUTE_PER_ITEM: u32 = 8;
+const OVERCUT_LENGTH_PENALTY: i64 = 50_000_000;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Item {
     pub label: String,
@@ -57,6 +64,7 @@ struct SelectedPattern {
 #[derive(Clone, Copy)]
 struct SearchState {
     remaining: [u32; MAX_ITEMS],
+    overcut: [u32; MAX_ITEMS],
     selected: [SelectedPattern; MAX_SELECTED_PATTERNS],
     selected_len: usize,
     stock_qty: u32,
@@ -67,6 +75,7 @@ impl SearchState {
     fn new(remaining: [u32; MAX_ITEMS]) -> Self {
         Self {
             remaining,
+            overcut: [0; MAX_ITEMS],
             selected: [SelectedPattern { candidate_index: 0, qty: 0 }; MAX_SELECTED_PATTERNS],
             selected_len: 0,
             stock_qty: 0,
@@ -176,8 +185,8 @@ pub fn compute_with_fallback(
 
     let mut remaining = [0u32; MAX_ITEMS];
     for i in 0..n {
-        let produced_primary = primary_demand[i].saturating_sub(primary.remaining[i]);
-        remaining[i] = demand[i].saturating_sub(produced_primary);
+        // If primary overcuts an item, fallback must not cut it again.
+        remaining[i] = primary.remaining[i];
     }
 
     let fallback_bars = best_fit_fallback_low(&lengths, &remaining, n, stock_length);
@@ -416,16 +425,23 @@ fn solve_quantity_low(
 
             for c_idx in 0..candidate_count {
                 let cand = candidates[c_idx];
-                let max_rep = max_repeat(&cand, &state.remaining, n);
+                let max_rep = max_repeat_with_overcut(&cand, &state.remaining, &state.overcut, demand, n);
                 if max_rep == 0 { continue; }
 
-                let mut trials = [0u32; 8];
-                let trial_count = make_trial_quantities(max_rep, bundle_size, &mut trials);
+                let mut trials = [0u32; 14];
+                let trial_count = make_trial_quantities_overcut(
+                    &cand,
+                    &state.remaining,
+                    max_rep,
+                    bundle_size,
+                    n,
+                    &mut trials,
+                );
                 for t in 0..trial_count {
                     let q = trials[t];
                     if q == 0 { continue; }
                     let mut ns = state;
-                    if !subtract_candidate(&mut ns.remaining, &cand, q, n) { continue; }
+                    if !apply_candidate_with_overcut(&mut ns.remaining, &mut ns.overcut, demand, &cand, q, n) { continue; }
                     ns.stock_qty = ns.stock_qty.saturating_add(q);
                     add_selected(&mut ns, c_idx, q);
                     ns.score = final_score(&ns, lengths, n, stock_length);
@@ -467,11 +483,11 @@ fn greedy_quantity_solution(
 
     for c_idx in 0..candidate_count {
         let cand = candidates[c_idx];
-        let max_rep = max_repeat(&cand, &state.remaining, n);
+        let max_rep = max_repeat_with_overcut(&cand, &state.remaining, &state.overcut, demand, n);
         if max_rep == 0 { continue; }
         let q = if bundle_size <= 1 { max_rep } else { (max_rep / bundle_size) * bundle_size };
         if q == 0 { continue; }
-        subtract_candidate(&mut state.remaining, &cand, q, n);
+        apply_candidate_with_overcut(&mut state.remaining, &mut state.overcut, demand, &cand, q, n);
         state.stock_qty += q;
         add_selected(&mut state, c_idx, q);
         if all_done(&state.remaining, n) { break; }
@@ -826,7 +842,7 @@ fn add_selected(state: &mut SearchState, c_idx: usize, qty: u32) {
 
 fn push_state_dedup(states: &mut [SearchState; MAX_STATES], count: &mut usize, state: SearchState, n: usize) {
     for i in 0..*count {
-        if same_remaining(&states[i].remaining, &state.remaining, n) {
+        if same_state_balance(&states[i], &state, n) {
             if state.score < states[i].score {
                 states[i] = state;
             }
@@ -894,16 +910,151 @@ fn final_score(state: &SearchState, lengths: &[u32; MAX_ITEMS], n: usize, stock_
     let total_bars = state.stock_qty + fallback;
     let rem_len = remaining_length(lengths, &state.remaining, n);
     let fallback_waste = fallback.saturating_mul(stock_length).saturating_sub(rem_len);
+    let overcut_len = overcut_length(lengths, &state.overcut, n);
+    let pattern_count = state.selected_len as i64;
 
     // Priority:
     // 1. lowest total bars
     // 2. lowest fallback bars
-    // 3. lowest estimated waste
-    // 4. lower remaining length
+    // 3. avoid excessive overcut
+    // 4. lowest estimated material waste
+    // 5. lower remaining length / fewer pattern types
     total_bars as i64 * 1_000_000_000
         + fallback as i64 * 100_000_000
+        + overcut_len as i64 * OVERCUT_LENGTH_PENALTY
         + fallback_waste as i64 * 10_000
         + rem_len as i64
+        + pattern_count * 10
+}
+
+fn max_allowed_overcut(demand: u32) -> u32 {
+    if !ALLOW_OVERCUT {
+        return 0;
+    }
+    let percent_allowance = demand.saturating_mul(MAX_OVERCUT_PERCENT_PER_ITEM) / 100;
+    percent_allowance.max(MAX_OVERCUT_ABSOLUTE_PER_ITEM)
+}
+
+fn max_repeat_with_overcut(
+    cand: &Candidate,
+    remaining: &[u32; MAX_ITEMS],
+    overcut: &[u32; MAX_ITEMS],
+    demand: &[u32; MAX_ITEMS],
+    n: usize,
+) -> u32 {
+    let mut max_rep = u32::MAX;
+    let mut has = false;
+
+    for i in 0..n {
+        let c = cand.counts[i] as u32;
+        if c == 0 { continue; }
+        has = true;
+        let allowance = max_allowed_overcut(demand[i]);
+        let over_left = allowance.saturating_sub(overcut[i]);
+        let allowed_extra_cuts = remaining[i].saturating_add(over_left);
+        max_rep = max_rep.min(allowed_extra_cuts / c);
+    }
+
+    if has { max_rep } else { 0 }
+}
+
+fn make_trial_quantities_overcut(
+    cand: &Candidate,
+    remaining: &[u32; MAX_ITEMS],
+    max_rep: u32,
+    bundle_size: u32,
+    n: usize,
+    out: &mut [u32; 14],
+) -> usize {
+    let mut count = 0usize;
+    let step = bundle_size.max(1);
+    let max_q = (max_rep / step) * step;
+    if max_q == 0 { return 0; }
+
+    push_u32_unique_dyn(out, &mut count, max_q);
+    push_u32_unique_dyn(out, &mut count, step);
+    push_u32_unique_dyn(out, &mut count, (max_q / 2 / step) * step);
+    if max_q > step { push_u32_unique_dyn(out, &mut count, max_q - step); }
+    if max_q >= step * 3 { push_u32_unique_dyn(out, &mut count, step * 2); }
+    if max_q >= step * 4 { push_u32_unique_dyn(out, &mut count, (max_q / 3 / step) * step); }
+    if max_q >= step * 4 { push_u32_unique_dyn(out, &mut count, ((max_q * 2) / 3 / step) * step); }
+
+    // Critical for overcut: try the quantity that just covers a remaining item.
+    // Example: remaining 1736, candidate uses 5 pieces => ceil(1736/5) = 348.
+    for i in 0..n {
+        let c = cand.counts[i] as u32;
+        if c == 0 || remaining[i] == 0 { continue; }
+        let ceil_q = (remaining[i] + c - 1) / c;
+        let ceil_q = ((ceil_q + step - 1) / step) * step;
+        if ceil_q <= max_q {
+            push_u32_unique_dyn(out, &mut count, ceil_q);
+        }
+        if ceil_q > step {
+            push_u32_unique_dyn(out, &mut count, ceil_q - step);
+        }
+        if ceil_q + step <= max_q {
+            push_u32_unique_dyn(out, &mut count, ceil_q + step);
+        }
+    }
+
+    out[..count].sort_by_key(|&q| std::cmp::Reverse(q));
+    count
+}
+
+fn push_u32_unique_dyn<const N: usize>(out: &mut [u32; N], count: &mut usize, v: u32) {
+    if v == 0 || *count >= out.len() { return; }
+    for i in 0..*count {
+        if out[i] == v { return; }
+    }
+    out[*count] = v;
+    *count += 1;
+}
+
+fn apply_candidate_with_overcut(
+    remaining: &mut [u32; MAX_ITEMS],
+    overcut: &mut [u32; MAX_ITEMS],
+    demand: &[u32; MAX_ITEMS],
+    cand: &Candidate,
+    q: u32,
+    n: usize,
+) -> bool {
+    let mut new_remaining = *remaining;
+    let mut new_overcut = *overcut;
+
+    for i in 0..n {
+        let produce = cand.counts[i] as u32 * q;
+        if produce == 0 { continue; }
+
+        if produce <= new_remaining[i] {
+            new_remaining[i] -= produce;
+        } else {
+            let extra = produce - new_remaining[i];
+            new_remaining[i] = 0;
+            new_overcut[i] = new_overcut[i].saturating_add(extra);
+            if new_overcut[i] > max_allowed_overcut(demand[i]) {
+                return false;
+            }
+        }
+    }
+
+    *remaining = new_remaining;
+    *overcut = new_overcut;
+    true
+}
+
+fn overcut_length(lengths: &[u32; MAX_ITEMS], overcut: &[u32; MAX_ITEMS], n: usize) -> u32 {
+    let mut total = 0u32;
+    for i in 0..n {
+        total = total.saturating_add(lengths[i].saturating_mul(overcut[i]));
+    }
+    total
+}
+
+fn same_state_balance(a: &SearchState, b: &SearchState, n: usize) -> bool {
+    for i in 0..n {
+        if a.remaining[i] != b.remaining[i] || a.overcut[i] != b.overcut[i] { return false; }
+    }
+    true
 }
 
 fn sort_order_desc(order: &mut [usize; MAX_ITEMS], n: usize, lengths: &[u32; MAX_ITEMS]) {
