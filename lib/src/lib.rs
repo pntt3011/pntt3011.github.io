@@ -6,10 +6,10 @@ use wasm_bindgen::prelude::*;
 // Hot path uses fixed-size arrays and linear buffers instead of HashMap/HashSet/Vec<Vec<_>>.
 // Tune these based on your expected data size.
 const MAX_ITEMS: usize = 32;
-const MAX_CANDIDATES: usize = 384;
-const MAX_STATES: usize = 320;
+const MAX_CANDIDATES: usize = 320;
+const MAX_STATES: usize = 256;
 const MAX_SELECTED_PATTERNS: usize = 10;
-const MAX_RANDOM_GREEDY: usize = 48;
+const MAX_RANDOM_GREEDY: usize = 32;
 const MIN_FILL_PERCENT: u32 = 50;
 
 // Overcut control. Extra produced pieces are allowed, but strongly penalized.
@@ -47,11 +47,12 @@ pub struct CuttingResult {
 struct Candidate {
     counts: [u16; MAX_ITEMS],
     used: u32,
+    fp: u64,
 }
 
 impl Candidate {
     fn empty() -> Self {
-        Self { counts: [0; MAX_ITEMS], used: 0 }
+        Self { counts: [0; MAX_ITEMS], used: 0, fp: 0 }
     }
 }
 
@@ -65,6 +66,7 @@ struct SelectedPattern {
 struct SearchState {
     remaining: [u32; MAX_ITEMS],
     overcut: [u32; MAX_ITEMS],
+    key: u64,
     selected: [SelectedPattern; MAX_SELECTED_PATTERNS],
     selected_len: usize,
     stock_qty: u32,
@@ -76,6 +78,7 @@ impl SearchState {
         Self {
             remaining,
             overcut: [0; MAX_ITEMS],
+            key: 0,
             selected: [SelectedPattern { candidate_index: 0, qty: 0 }; MAX_SELECTED_PATTERNS],
             selected_len: 0,
             stock_qty: 0,
@@ -242,6 +245,7 @@ fn solve_single_length_primary(
         state.stock_qty = q;
     }
 
+    state.key = state_key(&state.remaining, &state.overcut, n);
     state.score = final_score(&state, lengths, n, stock_length);
     state
 }
@@ -406,7 +410,10 @@ fn solve_quantity_low(
     let mut states = [SearchState::new([0; MAX_ITEMS]); MAX_STATES];
     let mut next_states = [SearchState::new([0; MAX_ITEMS]); MAX_STATES];
 
+    let lower_bound_bars = lower_bound_bars(lengths, demand, n, stock_length);
+
     states[0] = SearchState::new(*demand);
+    states[0].key = state_key(&states[0].remaining, &states[0].overcut, n);
     states[0].score = final_score(&states[0], lengths, n, stock_length);
     let mut state_count = 1usize;
     let mut best = states[0];
@@ -420,6 +427,7 @@ fn solve_quantity_low(
             let state = states[s_idx];
             if all_done(&state.remaining, n) {
                 if state.score < best.score { best = state; }
+                if state.stock_qty <= lower_bound_bars { return state; }
                 continue;
             }
 
@@ -444,9 +452,11 @@ fn solve_quantity_low(
                     if !apply_candidate_with_overcut(&mut ns.remaining, &mut ns.overcut, demand, &cand, q, n) { continue; }
                     ns.stock_qty = ns.stock_qty.saturating_add(q);
                     add_selected(&mut ns, c_idx, q);
+                    ns.key = state_key(&ns.remaining, &ns.overcut, n);
                     ns.score = final_score(&ns, lengths, n, stock_length);
 
                     if ns.score < best.score { best = ns; }
+                    if all_done(&ns.remaining, n) && ns.stock_qty <= lower_bound_bars { return ns; }
                     push_state_dedup(&mut next_states, &mut next_count, ns, n);
                 }
             }
@@ -455,6 +465,10 @@ fn solve_quantity_low(
         if next_count == 0 { break; }
         sort_states(&mut next_states, next_count);
         if next_count > MAX_STATES { next_count = MAX_STATES; }
+
+        if all_done(&best.remaining, n) && best.stock_qty <= lower_bound_bars {
+            return best;
+        }
 
         for i in 0..next_count {
             states[i] = next_states[i];
@@ -493,6 +507,7 @@ fn greedy_quantity_solution(
         if all_done(&state.remaining, n) { break; }
     }
 
+    state.key = state_key(&state.remaining, &state.overcut, n);
     state.score = final_score(&state, lengths, n, stock_length);
     state
 }
@@ -734,15 +749,18 @@ fn validate(items: &[Item], stock_length: u32, bundle_size: u32) -> Result<(), S
 fn push_candidate_linear(
     out: &mut [Candidate; MAX_CANDIDATES],
     count: &mut usize,
-    cand: Candidate,
+    mut cand: Candidate,
     n: usize,
     stock_length: u32,
 ) {
     if cand.used == 0 || cand.used > stock_length { return; }
     if cand.used * 100 < stock_length * MIN_FILL_PERCENT && *count > 32 { return; }
 
+    cand.fp = candidate_fingerprint(&cand, n);
+
+    // Fast fingerprint filter first; full count compare only on collision.
     for i in 0..*count {
-        if same_counts(&out[i], &cand, n) { return; }
+        if out[i].fp == cand.fp && same_counts(&out[i], &cand, n) { return; }
     }
     if *count < MAX_CANDIDATES {
         out[*count] = cand;
@@ -842,7 +860,7 @@ fn add_selected(state: &mut SearchState, c_idx: usize, qty: u32) {
 
 fn push_state_dedup(states: &mut [SearchState; MAX_STATES], count: &mut usize, state: SearchState, n: usize) {
     for i in 0..*count {
-        if same_state_balance(&states[i], &state, n) {
+        if states[i].key == state.key && same_state_balance(&states[i], &state, n) {
             if state.score < states[i].score {
                 states[i] = state;
             }
@@ -1063,6 +1081,37 @@ fn sort_order_desc(order: &mut [usize; MAX_ITEMS], n: usize, lengths: &[u32; MAX
 
 fn sort_order_qty_desc(order: &mut [usize; MAX_ITEMS], n: usize, qty: &[u32; MAX_ITEMS]) {
     order[..n].sort_by_key(|&i| std::cmp::Reverse(qty[i]));
+}
+
+
+fn candidate_fingerprint(c: &Candidate, n: usize) -> u64 {
+    let mut h = 1469598103934665603u64;
+    for i in 0..n {
+        h ^= c.counts[i] as u64 + ((i as u64) << 32);
+        h = h.wrapping_mul(1099511628211);
+    }
+    h ^ ((c.used as u64) << 17)
+}
+
+fn state_key(remaining: &[u32; MAX_ITEMS], overcut: &[u32; MAX_ITEMS], n: usize) -> u64 {
+    let mut h = 0xcbf29ce484222325u64;
+    for i in 0..n {
+        h ^= remaining[i] as u64;
+        h = h.wrapping_mul(0x100000001b3);
+        h ^= (overcut[i] as u64).rotate_left(21);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+fn lower_bound_bars(
+    lengths: &[u32; MAX_ITEMS],
+    demand: &[u32; MAX_ITEMS],
+    n: usize,
+    stock_length: u32,
+) -> u32 {
+    let total = remaining_length(lengths, demand, n);
+    if total == 0 { 0 } else { (total + stock_length - 1) / stock_length }
 }
 
 struct Lcg { state: u64 }
