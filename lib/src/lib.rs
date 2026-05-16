@@ -598,7 +598,7 @@ fn insert_pattern(
             let mut cuts = Vec::new();
 
             let mut sorted_indices: Vec<usize> = (0..items.len()).collect();
-            sorted_indices.sort_by_key(|&i| items[i].length);
+            sorted_indices.sort_by_key(|&i| std::cmp::Reverse(items[i].length));
 
             for i in sorted_indices {
                 let count = candidate.counts[i];
