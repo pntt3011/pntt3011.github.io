@@ -1,15 +1,15 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use wasm_bindgen::prelude::*;
 
-// Balanced defaults for browser/WASM use.
-// Increase these for slightly better material saving, decrease for faster results.
-const MAX_PRIMARY_PATTERNS: usize = 6;
-const MAX_CANDIDATES: usize = 420;
-const KNAPSACK_CANDIDATE_LIMIT: usize = 180;
-const QUANTITY_BEAM_WIDTH: usize = 450;
-const RANDOM_CANDIDATE_COUNT: usize = 80;
-const MIN_FILL_PERCENT_TO_KEEP: u32 = 55;
+// Low-allocation WASM-friendly solver.
+// Hot path uses fixed-size arrays and linear buffers instead of HashMap/HashSet/Vec<Vec<_>>.
+// Tune these based on your expected data size.
+const MAX_ITEMS: usize = 32;
+const MAX_CANDIDATES: usize = 384;
+const MAX_STATES: usize = 320;
+const MAX_SELECTED_PATTERNS: usize = 10;
+const MAX_RANDOM_GREEDY: usize = 48;const MIN_FILL_PERCENT: u32 = 50;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Item {
@@ -35,17 +35,43 @@ pub struct CuttingResult {
     pub used_fallback: bool,
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 struct Candidate {
-    counts: Vec<u32>,
+    counts: [u16; MAX_ITEMS],
     used: u32,
 }
 
-#[derive(Debug, Clone)]
-struct State {
-    remaining: Vec<u32>,
-    selected: Vec<(Candidate, u32)>,
+impl Candidate {
+    fn empty() -> Self {
+        Self { counts: [0; MAX_ITEMS], used: 0 }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SelectedPattern {
+    candidate_index: u16,
+    qty: u32,
+}
+
+#[derive(Clone, Copy)]
+struct SearchState {
+    remaining: [u32; MAX_ITEMS],
+    selected: [SelectedPattern; MAX_SELECTED_PATTERNS],
+    selected_len: usize,
     stock_qty: u32,
+    score: i64,
+}
+
+impl SearchState {
+    fn new(remaining: [u32; MAX_ITEMS]) -> Self {
+        Self {
+            remaining,
+            selected: [SelectedPattern { candidate_index: 0, qty: 0 }; MAX_SELECTED_PATTERNS],
+            selected_len: 0,
+            stock_qty: 0,
+            score: i64::MAX,
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -79,74 +105,559 @@ fn group_items_by_length(items: &[Item]) -> Vec<Item> {
 
     for (&length, group) in &length_to_items {
         let total_qty: u32 = group.iter().map(|x| x.qty).sum();
-
-        grouped_items.push(Item {
-            label: length.to_string(),
-            length,
-            qty: total_qty,
-        });
+        grouped_items.push(Item { label: length.to_string(), length, qty: total_qty });
     }
 
     grouped_items.sort_by_key(|i| std::cmp::Reverse(i.length));
     grouped_items
 }
 
+pub fn compute_with_fallback(
+    items: &[Item],
+    stock_length: u32,
+    bundle_size: u32,
+) -> Result<CuttingResult, String> {
+    validate(items, stock_length, bundle_size)?;
+
+    let n = items.len();
+    if n > MAX_ITEMS {
+        return Err(format!("Too many grouped item lengths: {}. MAX_ITEMS is {}", n, MAX_ITEMS));
+    }
+
+    let total_required: u32 = items.iter().map(|x| x.length.saturating_mul(x.qty)).sum();
+    if total_required == 0 {
+        return Ok(CuttingResult { patterns: vec![], stock_qty: 0, percentage_wasted: 0.0, used_fallback: false });
+    }
+
+    let mut lengths = [0u32; MAX_ITEMS];
+    let mut demand = [0u32; MAX_ITEMS];
+    let mut primary_demand = [0u32; MAX_ITEMS];
+
+    for i in 0..n {
+        lengths[i] = items[i].length;
+        demand[i] = items[i].qty;
+        primary_demand[i] = (items[i].qty / bundle_size) * bundle_size;
+    }
+
+    let mut candidates = [Candidate::empty(); MAX_CANDIDATES];
+    let candidate_count;
+
+    // Exact and fastest path for one grouped length.
+    let primary = if n == 1 {
+        let max_per_bar = if lengths[0] == 0 { 0 } else { stock_length / lengths[0] };
+        if max_per_bar > 0 {
+            candidates[0].counts[0] = max_per_bar.min(u16::MAX as u32) as u16;
+            candidates[0].used = max_per_bar * lengths[0];
+            candidate_count = 1;
+        } else {
+            candidate_count = 0;
+        }
+        solve_single_length_primary(&lengths, &primary_demand, n, stock_length, bundle_size)
+    } else {
+        candidate_count = generate_candidates_low(
+            &lengths,
+            &primary_demand,
+            n,
+            stock_length,
+            &mut candidates,
+        );
+
+        solve_quantity_low(
+            &lengths,
+            &primary_demand,
+            n,
+            stock_length,
+            bundle_size,
+            &candidates,
+            candidate_count,
+        )
+    };
+
+    let mut remaining = [0u32; MAX_ITEMS];
+    for i in 0..n {
+        let produced_primary = primary_demand[i].saturating_sub(primary.remaining[i]);
+        remaining[i] = demand[i].saturating_sub(produced_primary);
+    }
+
+    let fallback_bars = best_fit_fallback_low(&lengths, &remaining, n, stock_length);
+    let used_fallback = fallback_bars.iter().any(|b| b.used > 0);
+
+    Ok(build_result_low(
+        primary,
+        fallback_bars,
+        &lengths,
+        n,
+        items,
+        stock_length,
+        total_required,
+        used_fallback,
+        &candidates,
+        candidate_count,
+    ))
+}
+
+fn solve_single_length_primary(
+    lengths: &[u32; MAX_ITEMS],
+    demand: &[u32; MAX_ITEMS],
+    n: usize,
+    stock_length: u32,
+    bundle_size: u32,
+) -> SearchState {
+    let mut state = SearchState::new(*demand);
+    if n == 0 || lengths[0] == 0 || demand[0] == 0 {
+        state.score = 0;
+        return state;
+    }
+
+    let max_per_bar = stock_length / lengths[0];
+    if max_per_bar == 0 {
+        return state;
+    }
+
+    // Keep the old business rule: primary pattern qty must be divisible by bundle_size.
+    let primary_bars = demand[0] / max_per_bar;
+    let q = if bundle_size <= 1 {
+        primary_bars
+    } else {
+        (primary_bars / bundle_size) * bundle_size
+    };
+
+    if q > 0 {
+        let mut cand = Candidate::empty();
+        cand.counts[0] = max_per_bar as u16;
+        cand.used = max_per_bar * lengths[0];
+        state.remaining[0] = demand[0].saturating_sub(max_per_bar * q);
+        state.selected[0] = SelectedPattern { candidate_index: 0, qty: q };
+        state.selected_len = 1;
+        state.stock_qty = q;
+    }
+
+    state.score = final_score(&state, lengths, n, stock_length);
+    state
+}
+
+fn generate_candidates_low(
+    lengths: &[u32; MAX_ITEMS],
+    remaining: &[u32; MAX_ITEMS],
+    n: usize,
+    stock_length: u32,
+    out: &mut [Candidate; MAX_CANDIDATES],
+) -> usize {
+    let mut count = 0usize;
+    let mut order_len = [0usize; MAX_ITEMS];
+    let mut order_qty = [0usize; MAX_ITEMS];
+    for i in 0..n {
+        order_len[i] = i;
+        order_qty[i] = i;
+    }
+    sort_order_desc(&mut order_len, n, lengths);
+    sort_order_qty_desc(&mut order_qty, n, remaining);
+
+    let cand = greedy_candidate(lengths, remaining, n, stock_length, &order_len, n, None);
+    push_candidate_linear(out, &mut count, cand, n, stock_length);
+
+    let cand = greedy_candidate(lengths, remaining, n, stock_length, &order_qty, n, None);
+    push_candidate_linear(out, &mut count, cand, n, stock_length);
+
+    for k in 0..n {
+        let seed = order_len[k];
+        if remaining[seed] == 0 { continue; }
+        let cand = greedy_candidate(lengths, remaining, n, stock_length, &order_len, n, Some(seed));
+        push_candidate_linear(out, &mut count, cand, n, stock_length);
+    }
+
+    // Single-length max-fill candidates.
+    for k in 0..n {
+        let i = order_len[k];
+        if remaining[i] == 0 || lengths[i] == 0 { continue; }
+        let max_count = remaining[i].min(stock_length / lengths[i]);
+        if max_count > 0 && max_count <= u16::MAX as u32 {
+            let mut cand = Candidate::empty();
+            cand.counts[i] = max_count as u16;
+            cand.used = max_count * lengths[i];
+            push_candidate_linear(out, &mut count, cand, n, stock_length);
+        }
+    }
+
+    // Deterministic shuffled greedy variants, no RNG allocation.
+    let mut rng = Lcg::new(0x9E3779B97F4A7C15);
+    let mut order = [0usize; MAX_ITEMS];
+    for _ in 0..MAX_RANDOM_GREEDY {
+        for i in 0..n { order[i] = order_len[i]; }
+        for i in 0..n {
+            let j = rng.next_usize(n);
+            order.swap(i, j);
+        }
+        let cand = greedy_candidate(lengths, remaining, n, stock_length, &order, n, None);
+        push_candidate_linear(out, &mut count, cand, n, stock_length);
+    }
+
+    generate_knapsack_candidates_low(lengths, remaining, n, stock_length, out, &mut count);
+
+    sort_candidates(out, count, stock_length);
+    count
+}
+
+fn greedy_candidate(
+    lengths: &[u32; MAX_ITEMS],
+    remaining: &[u32; MAX_ITEMS],
+    n: usize,
+    stock_length: u32,
+    order: &[usize; MAX_ITEMS],
+    order_n: usize,
+    seed: Option<usize>,
+) -> Candidate {
+    let mut cand = Candidate::empty();
+
+    if let Some(i) = seed {
+        if i < n && remaining[i] > 0 && lengths[i] <= stock_length {
+            cand.counts[i] = 1;
+            cand.used = lengths[i];
+        }
+    }
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for k in 0..order_n {
+            let i = order[k];
+            if i >= n { continue; }
+            if cand.counts[i] as u32 >= remaining[i] { continue; }
+            if cand.used + lengths[i] <= stock_length {
+                cand.counts[i] += 1;
+                cand.used += lengths[i];
+                changed = true;
+            }
+        }
+    }
+
+    cand
+}
+
+fn generate_knapsack_candidates_low(
+    lengths: &[u32; MAX_ITEMS],
+    remaining: &[u32; MAX_ITEMS],
+    n: usize,
+    stock_length: u32,
+    out: &mut [Candidate; MAX_CANDIDATES],
+    count: &mut usize,
+) {
+    let cap = stock_length as usize;
+    if cap == 0 || cap > 30000 { return; }
+
+    let mut reachable = vec![false; cap + 1];
+    let mut dp = vec![Candidate::empty(); cap + 1];
+    reachable[0] = true;
+
+    for i in 0..n {
+        if lengths[i] == 0 || remaining[i] == 0 { continue; }
+        let len = lengths[i] as usize;
+        if len > cap { continue; }
+        let max_count = remaining[i].min(stock_length / lengths[i]).min(u16::MAX as u32);
+
+        for _ in 0..max_count {
+            for used in (0..=cap - len).rev() {
+                if !reachable[used] { continue; }
+                let next_used = used + len;
+                let mut next = dp[used];
+                if next.counts[i] == u16::MAX { continue; }
+                next.counts[i] += 1;
+                next.used += lengths[i];
+
+                if !reachable[next_used] || candidate_better_for_same_used(&next, &dp[next_used], n) {
+                    reachable[next_used] = true;
+                    dp[next_used] = next;
+                }
+            }
+        }
+    }
+
+    let min_used = stock_length * MIN_FILL_PERCENT / 100;
+    let mut added = 0usize;
+    for used in (1..=cap).rev() {
+        if !reachable[used] { continue; }
+        let cand = dp[used];
+        if cand.used < min_used && added > 16 { break; }
+        push_candidate_linear(out, count, cand, n, stock_length);
+        added += 1;
+        if added >= 160 || *count >= MAX_CANDIDATES { break; }
+    }
+}
+
+fn solve_quantity_low(
+    lengths: &[u32; MAX_ITEMS],
+    demand: &[u32; MAX_ITEMS],
+    n: usize,
+    stock_length: u32,
+    bundle_size: u32,
+    candidates: &[Candidate; MAX_CANDIDATES],
+    candidate_count: usize,
+) -> SearchState {
+    let mut states = [SearchState::new([0; MAX_ITEMS]); MAX_STATES];
+    let mut next_states = [SearchState::new([0; MAX_ITEMS]); MAX_STATES];
+
+    states[0] = SearchState::new(*demand);
+    states[0].score = final_score(&states[0], lengths, n, stock_length);
+    let mut state_count = 1usize;
+    let mut best = states[0];
+
+    let depth_limit = MAX_SELECTED_PATTERNS.min(candidate_count);
+
+    for _depth in 0..depth_limit {
+        let mut next_count = 0usize;
+
+        for s_idx in 0..state_count {
+            let state = states[s_idx];
+            if all_done(&state.remaining, n) {
+                if state.score < best.score { best = state; }
+                continue;
+            }
+
+            for c_idx in 0..candidate_count {
+                let cand = candidates[c_idx];
+                let max_rep = max_repeat(&cand, &state.remaining, n);
+                if max_rep == 0 { continue; }
+
+                let mut trials = [0u32; 8];
+                let trial_count = make_trial_quantities(max_rep, bundle_size, &mut trials);
+                for t in 0..trial_count {
+                    let q = trials[t];
+                    if q == 0 { continue; }
+                    let mut ns = state;
+                    if !subtract_candidate(&mut ns.remaining, &cand, q, n) { continue; }
+                    ns.stock_qty = ns.stock_qty.saturating_add(q);
+                    add_selected(&mut ns, c_idx, q);
+                    ns.score = final_score(&ns, lengths, n, stock_length);
+
+                    if ns.score < best.score { best = ns; }
+                    push_state_dedup(&mut next_states, &mut next_count, ns, n);
+                }
+            }
+        }
+
+        if next_count == 0 { break; }
+        sort_states(&mut next_states, next_count);
+        if next_count > MAX_STATES { next_count = MAX_STATES; }
+
+        for i in 0..next_count {
+            states[i] = next_states[i];
+        }
+        state_count = next_count;
+    }
+
+    // If search produced nothing good, use a greedy candidate walk as safe fallback.
+    if best.stock_qty == 0 && !all_done(demand, n) {
+        best = greedy_quantity_solution(lengths, demand, n, stock_length, bundle_size, candidates, candidate_count);
+    }
+
+    best
+}
+
+fn greedy_quantity_solution(
+    lengths: &[u32; MAX_ITEMS],
+    demand: &[u32; MAX_ITEMS],
+    n: usize,
+    stock_length: u32,
+    bundle_size: u32,
+    candidates: &[Candidate; MAX_CANDIDATES],
+    candidate_count: usize,
+) -> SearchState {
+    let mut state = SearchState::new(*demand);
+
+    for c_idx in 0..candidate_count {
+        let cand = candidates[c_idx];
+        let max_rep = max_repeat(&cand, &state.remaining, n);
+        if max_rep == 0 { continue; }
+        let q = if bundle_size <= 1 { max_rep } else { (max_rep / bundle_size) * bundle_size };
+        if q == 0 { continue; }
+        subtract_candidate(&mut state.remaining, &cand, q, n);
+        state.stock_qty += q;
+        add_selected(&mut state, c_idx, q);
+        if all_done(&state.remaining, n) { break; }
+    }
+
+    state.score = final_score(&state, lengths, n, stock_length);
+    state
+}
+
+fn best_fit_fallback_low(
+    lengths: &[u32; MAX_ITEMS],
+    remaining: &[u32; MAX_ITEMS],
+    n: usize,
+    stock_length: u32,
+) -> Vec<Candidate> {
+    let mut bars: Vec<Candidate> = Vec::new();
+
+    let mut order = [0usize; MAX_ITEMS];
+    for i in 0..n { order[i] = i; }
+    sort_order_desc(&mut order, n, lengths);
+
+    for k in 0..n {
+        let i = order[k];
+        for _ in 0..remaining[i] {
+            let len = lengths[i];
+            let mut best_index: Option<usize> = None;
+            let mut best_rem = u32::MAX;
+
+            for b in 0..bars.len() {
+                if bars[b].used + len <= stock_length {
+                    let rem = stock_length - (bars[b].used + len);
+                    if rem < best_rem {
+                        best_rem = rem;
+                        best_index = Some(b);
+                    }
+                }
+            }
+
+            match best_index {
+                Some(b) => {
+                    bars[b].counts[i] += 1;
+                    bars[b].used += len;
+                }
+                None => {
+                    let mut cand = Candidate::empty();
+                    cand.counts[i] = 1;
+                    cand.used = len;
+                    bars.push(cand);
+                }
+            }
+        }
+    }
+
+    bars
+}
+
+fn build_result_low(
+    primary: SearchState,
+    fallback_bars: Vec<Candidate>,
+    lengths: &[u32; MAX_ITEMS],
+    n: usize,
+    items: &[Item],
+    stock_length: u32,
+    total_required: u32,
+    used_fallback: bool,
+    candidates: &[Candidate; MAX_CANDIDATES],
+    candidate_count: usize,
+) -> CuttingResult {
+    let mut patterns: Vec<Pattern> = Vec::new();
+
+    for s in 0..primary.selected_len {
+        let sel = primary.selected[s];
+        if sel.qty == 0 { continue; }
+        let idx = sel.candidate_index as usize;
+        if idx >= candidate_count { continue; }
+        let cand = candidates[idx];
+        insert_or_merge_pattern(&mut patterns, cand, sel.qty, items, stock_length, false, n);
+    }
+
+    for cand in fallback_bars {
+        if cand.used > 0 {
+            insert_or_merge_pattern(&mut patterns, cand, 1, items, stock_length, true, n);
+        }
+    }
+
+    patterns.sort_by_key(|p| {
+        (
+            p.is_fallback,
+            std::cmp::Reverse(p.qty),
+            p.waste,
+            std::cmp::Reverse(p.used_length),
+        )
+    });
+
+    let stock_qty: u32 = patterns.iter().map(|p| p.qty).sum();
+    let total_stock = stock_qty.saturating_mul(stock_length);
+    let total_waste = total_stock.saturating_sub(total_required);
+    let percentage_wasted = if total_stock == 0 { 0.0 } else { total_waste as f64 / total_stock as f64 * 100.0 };
+
+    CuttingResult { patterns, stock_qty, percentage_wasted, used_fallback }
+}
+
+fn insert_or_merge_pattern(
+    patterns: &mut Vec<Pattern>,
+    cand: Candidate,
+    qty: u32,
+    items: &[Item],
+    stock_length: u32,
+    is_fallback: bool,
+    n: usize,
+) {
+    let mut cuts = Vec::new();
+    let mut order = [0usize; MAX_ITEMS];
+    for i in 0..n { order[i] = i; }
+    order[..n].sort_by_key(|&i| std::cmp::Reverse(items[i].length));
+
+    for k in 0..n {
+        let i = order[k];
+        for _ in 0..cand.counts[i] {
+            cuts.push(format!("{} ({})", items[i].label, items[i].length));
+        }
+    }
+
+    for p in patterns.iter_mut() {
+        if p.is_fallback == is_fallback && p.cuts == cuts {
+            p.qty += qty;
+            return;
+        }
+    }
+
+    patterns.push(Pattern {
+        cuts,
+        qty,
+        used_length: cand.used,
+        waste: stock_length.saturating_sub(cand.used),
+        is_fallback,
+    });
+}
+
+fn array_from_items_qty(items: &[Item]) -> [u32; MAX_ITEMS] {
+    let mut a = [0u32; MAX_ITEMS];
+    for i in 0..items.len().min(MAX_ITEMS) {
+        a[i] = items[i].qty;
+    }
+    a
+}
+
 fn repopulate_original_labels(patterns: Vec<Pattern>, items: Vec<Item>) -> Vec<Pattern> {
     let mut pool: HashMap<u32, Vec<Item>> = HashMap::new();
-
     for item in items {
         pool.entry(item.length).or_default().push(item);
     }
 
     let mut pool_state: HashMap<u32, (usize, u32)> = HashMap::new();
-
     for &length in pool.keys() {
         pool_state.insert(length, (0, 0));
     }
 
     let mut final_patterns: Vec<Pattern> = Vec::new();
-
     for pattern in patterns {
         for _ in 0..pattern.qty {
             let mut new_cuts = Vec::new();
-
             for cut_str in &pattern.cuts {
-                let length = extract_length_from_cut(cut_str);
-
-                match length {
+                match extract_length_from_cut(cut_str) {
                     Some(length) => {
-                        let state = match pool_state.get_mut(&length) {
-                            Some(s) => s,
-                            None => {
-                                new_cuts.push(cut_str.clone());
-                                continue;
-                            }
+                        let Some(state) = pool_state.get_mut(&length) else {
+                            new_cuts.push(cut_str.clone());
+                            continue;
+                        };
+                        let Some(items_of_length) = pool.get(&length) else {
+                            new_cuts.push(cut_str.clone());
+                            continue;
                         };
 
-                        let items_of_length = match pool.get(&length) {
-                            Some(items) => items,
-                            None => {
-                                new_cuts.push(cut_str.clone());
-                                continue;
-                            }
-                        };
-
-                        let mut current_item_idx = state.0;
-                        let mut used_from_current = state.1;
-
-                        while current_item_idx < items_of_length.len()
-                            && used_from_current >= items_of_length[current_item_idx].qty
-                        {
-                            current_item_idx += 1;
-                            used_from_current = 0;
+                        let mut idx = state.0;
+                        let mut used = state.1;
+                        while idx < items_of_length.len() && used >= items_of_length[idx].qty {
+                            idx += 1;
+                            used = 0;
                         }
 
-                        if current_item_idx < items_of_length.len() {
-                            let original = &items_of_length[current_item_idx];
+                        if idx < items_of_length.len() {
+                            let original = &items_of_length[idx];
                             new_cuts.push(format!("{} ({})", original.label, length));
-                            used_from_current += 1;
-                            state.0 = current_item_idx;
-                            state.1 = used_from_current;
+                            used += 1;
+                            state.0 = idx;
+                            state.1 = used;
                         } else {
                             new_cuts.push(cut_str.clone());
                         }
@@ -155,17 +666,15 @@ fn repopulate_original_labels(patterns: Vec<Pattern>, items: Vec<Item>) -> Vec<P
                 }
             }
 
-            let mut found = false;
-
+            let mut merged = false;
             for p in final_patterns.iter_mut().rev() {
                 if p.cuts == new_cuts && p.is_fallback == pattern.is_fallback {
                     p.qty += 1;
-                    found = true;
+                    merged = true;
                     break;
                 }
             }
-
-            if !found {
+            if !merged {
                 final_patterns.push(Pattern {
                     cuts: new_cuts,
                     qty: 1,
@@ -188,943 +697,231 @@ fn extract_length_from_cut(cut: &str) -> Option<u32> {
             }
         }
     }
-
     cut.split_whitespace().next()?.parse::<u32>().ok()
 }
 
-pub fn compute_with_fallback(
-    items: &[Item],
-    stock_length: u32,
-    bundle_size: u32,
-) -> Result<CuttingResult, String> {
-    validate(items, stock_length, bundle_size)?;
+fn validate(items: &[Item], stock_length: u32, bundle_size: u32) -> Result<(), String> {
+    if stock_length == 0 { return Err("stock_length must be greater than 0".to_string()); }
+    if bundle_size == 0 { return Err("bundle_size must be greater than 0".to_string()); }
+    if items.len() > MAX_ITEMS { return Err(format!("Too many grouped lengths. Max is {}", MAX_ITEMS)); }
 
-    let total_required: u32 = items.iter().map(|x| x.length * x.qty).sum();
-
-    if total_required == 0 {
-        return Ok(CuttingResult {
-            patterns: vec![],
-            stock_qty: 0,
-            percentage_wasted: 0.0,
-            used_fallback: false,
-        });
-    }
-
-    let lengths: Vec<u32> = items.iter().map(|x| x.length).collect();
-
-    // Keep your previous rule: primary production handles full bundles only.
-    // Remainders below bundle_size are packed by fallback.
-    let primary_demand: Vec<u32> = items
-        .iter()
-        .map(|x| (x.qty / bundle_size) * bundle_size)
-        .collect();
-
-    let primary_state = solve_primary_patterns(&lengths, &primary_demand, stock_length);
-
-    let mut remaining = vec![0; items.len()];
-
-    for i in 0..items.len() {
-        let used_by_primary = primary_demand[i].saturating_sub(primary_state.remaining[i]);
-        remaining[i] = items[i].qty.saturating_sub(used_by_primary);
-    }
-
-    let fallback_bars = if remaining.iter().any(|&x| x > 0) {
-        best_fit_decreasing_fallback(&lengths, &remaining, stock_length)
-    } else {
-        vec![]
-    };
-
-    let used_fallback = !fallback_bars.is_empty();
-
-    Ok(build_result(
-        primary_state,
-        fallback_bars,
-        items,
-        stock_length,
-        total_required,
-        used_fallback,
-    ))
-}
-
-fn solve_primary_patterns(lengths: &[u32], demand: &[u32], stock_length: u32) -> State {
-    if demand.iter().all(|&x| x == 0) {
-        return State {
-            remaining: demand.to_vec(),
-            selected: vec![],
-            stock_qty: 0,
-        };
-    }
-
-    if let Some(state) = solve_single_length_exact(lengths, demand, stock_length) {
-        return state;
-    }
-
-    let mut candidates = generate_candidate_pool(lengths, demand, stock_length);
-    prune_and_sort_candidates(&mut candidates, lengths, demand, stock_length);
-
-    let beam_state = quantity_beam_search(lengths, demand, stock_length, &candidates);
-    local_improve_with_fallback(lengths, stock_length, beam_state, &candidates)
-}
-
-fn solve_single_length_exact(lengths: &[u32], demand: &[u32], stock_length: u32) -> Option<State> {
-    let active: Vec<usize> = demand
-        .iter()
-        .enumerate()
-        .filter_map(|(i, &q)| if q > 0 { Some(i) } else { None })
-        .collect();
-
-    if active.len() != 1 {
-        return None;
-    }
-
-    let i = active[0];
-    let per_full_bar = stock_length / lengths[i];
-
-    if per_full_bar == 0 {
-        return None;
-    }
-
-    let full_bars = demand[i] / per_full_bar;
-    let rem = demand[i] % per_full_bar;
-
-    let mut selected = Vec::new();
-    let mut stock_qty = 0;
-
-    if full_bars > 0 {
-        let mut counts = vec![0; lengths.len()];
-        counts[i] = per_full_bar;
-        selected.push((
-            Candidate {
-                counts,
-                used: per_full_bar * lengths[i],
-            },
-            full_bars,
-        ));
-        stock_qty += full_bars;
-    }
-
-    if rem > 0 {
-        let mut counts = vec![0; lengths.len()];
-        counts[i] = rem;
-        selected.push((
-            Candidate {
-                counts,
-                used: rem * lengths[i],
-            },
-            1,
-        ));
-        stock_qty += 1;
-    }
-
-    Some(State {
-        remaining: vec![0; lengths.len()],
-        selected,
-        stock_qty,
-    })
-}
-
-fn generate_candidate_pool(lengths: &[u32], demand: &[u32], stock_length: u32) -> Vec<Candidate> {
-    let n = lengths.len();
-    let mut candidates = Vec::new();
-    let mut seen: HashSet<Vec<u32>> = HashSet::new();
-
-    let mut desc_len: Vec<usize> = (0..n).collect();
-    desc_len.sort_by_key(|&i| std::cmp::Reverse(lengths[i]));
-
-    let mut asc_len = desc_len.clone();
-    asc_len.reverse();
-
-    let mut desc_qty: Vec<usize> = (0..n).collect();
-    desc_qty.sort_by_key(|&i| std::cmp::Reverse(demand[i]));
-
-    let mut desc_len_qty: Vec<usize> = (0..n).collect();
-    desc_len_qty.sort_by_key(|&i| (std::cmp::Reverse(lengths[i]), std::cmp::Reverse(demand[i])));
-
-    for order in [&desc_len, &asc_len, &desc_qty, &desc_len_qty] {
-        push_candidate(
-            &mut seen,
-            &mut candidates,
-            greedy_pattern(lengths, demand, stock_length, order, None),
-        );
-
-        for &seed in order.iter() {
-            push_candidate(
-                &mut seen,
-                &mut candidates,
-                greedy_pattern(lengths, demand, stock_length, order, Some(seed)),
-            );
+    for item in items {
+        if item.length == 0 { return Err(format!("Item '{}' has zero length", item.label)); }
+        if item.length > stock_length {
+            return Err(format!("Item '{}' length {} is longer than stock length {}", item.label, item.length, stock_length));
         }
     }
-
-    add_single_length_candidates(&mut seen, &mut candidates, lengths, demand, stock_length);
-
-    for cand in generate_knapsack_candidates(lengths, demand, stock_length, KNAPSACK_CANDIDATE_LIMIT) {
-        push_candidate(&mut seen, &mut candidates, cand);
-    }
-
-    let mut rng = Lcg::new(0x4d59_5df4_d0f3_3173);
-
-    for _ in 0..RANDOM_CANDIDATE_COUNT {
-        let mut order = desc_len.clone();
-
-        for i in 0..order.len() {
-            let j = rng.next_usize(order.len());
-            order.swap(i, j);
-        }
-
-        push_candidate(
-            &mut seen,
-            &mut candidates,
-            greedy_pattern(lengths, demand, stock_length, &order, None),
-        );
-    }
-
-    candidates
+    Ok(())
 }
 
-fn add_single_length_candidates(
-    seen: &mut HashSet<Vec<u32>>,
-    candidates: &mut Vec<Candidate>,
-    lengths: &[u32],
-    demand: &[u32],
+fn push_candidate_linear(
+    out: &mut [Candidate; MAX_CANDIDATES],
+    count: &mut usize,
+    cand: Candidate,
+    n: usize,
     stock_length: u32,
 ) {
-    for i in 0..lengths.len() {
-        if demand[i] == 0 {
-            continue;
-        }
+    if cand.used == 0 || cand.used > stock_length { return; }
+    if cand.used * 100 < stock_length * MIN_FILL_PERCENT && *count > 32 { return; }
 
-        let max_count = std::cmp::min(demand[i], stock_length / lengths[i]);
-
-        if max_count == 0 {
-            continue;
-        }
-
-        let mut useful_counts = vec![max_count, 1];
-
-        if max_count > 1 {
-            useful_counts.push(max_count - 1);
-            useful_counts.push((max_count + 1) / 2);
-        }
-
-        if demand[i] < max_count {
-            useful_counts.push(demand[i]);
-        }
-
-        useful_counts.sort();
-        useful_counts.dedup();
-
-        for count in useful_counts {
-            if count == 0 {
-                continue;
-            }
-
-            let mut counts = vec![0; lengths.len()];
-            counts[i] = count;
-            push_candidate(
-                seen,
-                candidates,
-                Candidate {
-                    counts,
-                    used: count * lengths[i],
-                },
-            );
-        }
+    for i in 0..*count {
+        if same_counts(&out[i], &cand, n) { return; }
+    }
+    if *count < MAX_CANDIDATES {
+        out[*count] = cand;
+        *count += 1;
     }
 }
 
-fn greedy_pattern(
-    lengths: &[u32],
-    demand: &[u32],
-    stock_length: u32,
-    order: &[usize],
-    seed: Option<usize>,
-) -> Candidate {
-    let mut counts = vec![0; lengths.len()];
-    let mut used = 0;
-
-    if let Some(i) = seed {
-        if demand[i] > 0 && lengths[i] <= stock_length {
-            counts[i] += 1;
-            used += lengths[i];
-        }
+fn same_counts(a: &Candidate, b: &Candidate, n: usize) -> bool {
+    for i in 0..n {
+        if a.counts[i] != b.counts[i] { return false; }
     }
-
-    loop {
-        let mut changed = false;
-
-        for &i in order {
-            if counts[i] < demand[i] && used + lengths[i] <= stock_length {
-                counts[i] += 1;
-                used += lengths[i];
-                changed = true;
-            }
-        }
-
-        if !changed {
-            break;
-        }
-    }
-
-    Candidate { counts, used }
+    true
 }
 
-fn generate_knapsack_candidates(
-    lengths: &[u32],
-    demand: &[u32],
-    stock_length: u32,
-    limit: usize,
-) -> Vec<Candidate> {
-    if lengths.is_empty() || stock_length == 0 || limit == 0 {
-        return vec![];
+fn candidate_better_for_same_used(a: &Candidate, b: &Candidate, n: usize) -> bool {
+    count_kinds(a, n) > count_kinds(b, n)
+}
+
+fn count_kinds(c: &Candidate, n: usize) -> u32 {
+    let mut k = 0;
+    for i in 0..n {
+        if c.counts[i] > 0 { k += 1; }
     }
+    k
+}
 
-    let capacity = stock_length as usize;
-    let mut dp: Vec<Option<Candidate>> = vec![None; capacity + 1];
-
-    dp[0] = Some(Candidate {
-        counts: vec![0; lengths.len()],
-        used: 0,
+fn sort_candidates(cands: &mut [Candidate; MAX_CANDIDATES], count: usize, stock_length: u32) {
+    cands[..count].sort_by_key(|c| {
+        let waste = stock_length.saturating_sub(c.used);
+        (waste, std::cmp::Reverse(c.used))
     });
-
-    for i in 0..lengths.len() {
-        if demand[i] == 0 || lengths[i] == 0 || lengths[i] > stock_length {
-            continue;
-        }
-
-        let item_len = lengths[i] as usize;
-        let max_in_bar = std::cmp::min(demand[i], stock_length / lengths[i]);
-
-        for _ in 0..max_in_bar {
-            for used in (0..=capacity - item_len).rev() {
-                let prev = match dp[used].clone() {
-                    Some(p) => p,
-                    None => continue,
-                };
-
-                let next_used = used + item_len;
-                let mut next = prev;
-                next.counts[i] += 1;
-                next.used += lengths[i];
-
-                let should_replace = match &dp[next_used] {
-                    None => true,
-                    Some(existing) => candidate_quality_key(&next, stock_length)
-                        < candidate_quality_key(existing, stock_length),
-                };
-
-                if should_replace {
-                    dp[next_used] = Some(next);
-                }
-            }
-        }
-    }
-
-    let mut out = Vec::new();
-    let mut seen: HashSet<Vec<u32>> = HashSet::new();
-
-    for used in (1..=capacity).rev() {
-        let cand = match dp[used].clone() {
-            Some(c) => c,
-            None => continue,
-        };
-
-        if seen.insert(cand.counts.clone()) {
-            out.push(cand);
-        }
-
-        if out.len() >= limit {
-            break;
-        }
-    }
-
-    out
 }
 
-fn candidate_quality_key(c: &Candidate, stock_length: u32) -> (u32, std::cmp::Reverse<usize>, std::cmp::Reverse<u32>) {
-    (
-        stock_length - c.used,
-        std::cmp::Reverse(c.counts.iter().filter(|&&x| x > 0).count()),
-        std::cmp::Reverse(c.used),
-    )
-}
-
-fn prune_and_sort_candidates(
-    candidates: &mut Vec<Candidate>,
-    lengths: &[u32],
-    demand: &[u32],
-    stock_length: u32,
-) {
-    let min_used = stock_length.saturating_mul(MIN_FILL_PERCENT_TO_KEEP) / 100;
-
-    let active_count = demand.iter().filter(|&&q| q > 0).count();
-
-    candidates.retain(|c| {
-        if c.used == 0 || c.used > stock_length {
-            return false;
-        }
-
-        let is_single_active = c.counts.iter().filter(|&&x| x > 0).count() == 1;
-        let is_small_but_needed = active_count <= 2 && is_single_active;
-
-        c.used >= min_used || is_small_but_needed
-    });
-
-    candidates.sort_by_key(|c| {
-        let total_piece_count: u32 = c.counts.iter().sum();
-        let kind_count = c.counts.iter().filter(|&&x| x > 0).count();
-
-        (
-            stock_length - c.used,
-            std::cmp::Reverse(kind_count),
-            std::cmp::Reverse(total_piece_count),
-            std::cmp::Reverse(c.used),
-        )
-    });
-
-    // Do not aggressively remove smaller patterns; they are often needed for remainders.
-    let _ = lengths;
-
-    if candidates.len() > MAX_CANDIDATES {
-        candidates.truncate(MAX_CANDIDATES);
-    }
-}
-
-fn quantity_beam_search(
-    lengths: &[u32],
-    demand: &[u32],
-    stock_length: u32,
-    candidates: &[Candidate],
-) -> State {
-    let greedy = greedy_quantity_solution(lengths, demand, stock_length, candidates);
-    let mut best = greedy.clone();
-    let mut beam = vec![State {
-        remaining: demand.to_vec(),
-        selected: vec![],
-        stock_qty: 0,
-    }];
-
-    for cand in candidates {
-        let mut next_states = beam.clone();
-
-        for state in &beam {
-            let max_repeat = max_pattern_repeat(cand, &state.remaining);
-
-            for q in quantity_options(max_repeat) {
-                if q == 0 {
-                    continue;
-                }
-
-                let mut remaining = state.remaining.clone();
-
-                for i in 0..remaining.len() {
-                    remaining[i] -= cand.counts[i] * q;
-                }
-
-                if state.selected.len() >= MAX_PRIMARY_PATTERNS
-                    && !state.selected.iter().any(|(c, _)| c.counts == cand.counts)
-                {
-                    continue;
-                }
-
-                let mut selected = state.selected.clone();
-                add_or_merge_pattern(&mut selected, cand.clone(), q);
-
-                let new_state = State {
-                    remaining,
-                    selected,
-                    stock_qty: state.stock_qty + q,
-                };
-
-                if final_objective_score(&new_state, lengths, stock_length)
-                    < final_objective_score(&best, lengths, stock_length)
-                {
-                    best = new_state.clone();
-                }
-
-                next_states.push(new_state);
-            }
-        }
-
-        dedup_states_by_remaining(&mut next_states, lengths, stock_length);
-        next_states.sort_by_key(|s| search_score(s, lengths, stock_length));
-        next_states.truncate(QUANTITY_BEAM_WIDTH);
-        beam = next_states;
-
-        for s in &beam {
-            if final_objective_score(s, lengths, stock_length)
-                < final_objective_score(&best, lengths, stock_length)
-            {
-                best = s.clone();
-            }
-        }
-
-        if is_done(&best.remaining) && best.selected.len() <= MAX_PRIMARY_PATTERNS {
-            // Continue a little would sometimes reduce waste, but for speed this is good enough.
-            // The final local improvement still gets a chance below.
-        }
-    }
-
-    // Prefer compact pattern count if material score is equal.
-    for s in beam {
-        let s_score = final_objective_score(&s, lengths, stock_length);
-        let b_score = final_objective_score(&best, lengths, stock_length);
-
-        if s_score < b_score
-            || (s_score == b_score && s.selected.len() < best.selected.len())
-        {
-            best = s;
-        }
-    }
-
-    best
-}
-
-fn quantity_options(max_repeat: u32) -> Vec<u32> {
-    if max_repeat == 0 {
-        return vec![];
-    }
-
-    let mut values = vec![max_repeat, 1];
-
-    if max_repeat > 1 {
-        values.push(max_repeat - 1);
-        values.push((max_repeat + 1) / 2);
-    }
-
-    if max_repeat > 3 {
-        values.push(max_repeat / 3);
-        values.push((max_repeat * 2) / 3);
-    }
-
-    if max_repeat <= 8 {
-        for q in 2..=max_repeat {
-            values.push(q);
-        }
-    }
-
-    values.retain(|&q| q > 0 && q <= max_repeat);
-    values.sort_by_key(|&q| std::cmp::Reverse(q));
-    values.dedup();
-    values
-}
-
-fn greedy_quantity_solution(
-    lengths: &[u32],
-    demand: &[u32],
-    stock_length: u32,
-    candidates: &[Candidate],
-) -> State {
-    let mut remaining = demand.to_vec();
-    let mut selected: Vec<(Candidate, u32)> = Vec::new();
-    let mut stock_qty = 0;
-
-    for cand in candidates {
-        let q = max_pattern_repeat(cand, &remaining);
-
-        if q == 0 {
-            continue;
-        }
-
-        for i in 0..remaining.len() {
-            remaining[i] -= cand.counts[i] * q;
-        }
-
-        add_or_merge_pattern(&mut selected, cand.clone(), q);
-        stock_qty += q;
-
-        if is_done(&remaining) || selected.len() >= MAX_PRIMARY_PATTERNS {
-            break;
-        }
-    }
-
-    let state = State {
-        remaining,
-        selected,
-        stock_qty,
-    };
-
-    // Ensure greedy starts with a usable bound even when candidate pool is weak.
-    if final_objective_score(&state, lengths, stock_length) < i64::MAX {
-        state
-    } else {
-        State {
-            remaining: demand.to_vec(),
-            selected: vec![],
-            stock_qty: 0,
-        }
-    }
-}
-
-fn local_improve_with_fallback(
-    lengths: &[u32],
-    stock_length: u32,
-    mut best: State,
-    candidates: &[Candidate],
-) -> State {
-    let mut improved = true;
-
-    while improved {
-        improved = false;
-
-        // Try adding one high-quality candidate if it reduces estimated final cost.
-        for cand in candidates.iter().take(120) {
-            if best.selected.len() >= MAX_PRIMARY_PATTERNS
-                && !best.selected.iter().any(|(c, _)| c.counts == cand.counts)
-            {
-                continue;
-            }
-
-            let max_repeat = max_pattern_repeat(cand, &best.remaining);
-
-            for q in quantity_options(max_repeat).into_iter().take(4) {
-                let mut remaining = best.remaining.clone();
-
-                for i in 0..remaining.len() {
-                    remaining[i] -= cand.counts[i] * q;
-                }
-
-                let mut selected = best.selected.clone();
-                add_or_merge_pattern(&mut selected, cand.clone(), q);
-
-                let trial = State {
-                    remaining,
-                    selected,
-                    stock_qty: best.stock_qty + q,
-                };
-
-                if final_objective_score(&trial, lengths, stock_length)
-                    < final_objective_score(&best, lengths, stock_length)
-                {
-                    best = trial;
-                    improved = true;
-                    break;
-                }
-            }
-
-            if improved {
-                break;
-            }
-        }
-    }
-
-    best
-}
-
-fn dedup_states_by_remaining(states: &mut Vec<State>, lengths: &[u32], stock_length: u32) {
-    let mut best_by_remaining: HashMap<Vec<u32>, State> = HashMap::new();
-
-    for state in states.drain(..) {
-        let key = state.remaining.clone();
-        let replace = match best_by_remaining.get(&key) {
-            None => true,
-            Some(existing) => search_score(&state, lengths, stock_length)
-                < search_score(existing, lengths, stock_length),
-        };
-
-        if replace {
-            best_by_remaining.insert(key, state);
-        }
-    }
-
-    *states = best_by_remaining.into_values().collect();
-}
-
-fn search_score(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
-    let secondary_bars = estimate_secondary_bars_fast(lengths, &state.remaining, stock_length);
-    let total_bars = state.stock_qty + secondary_bars;
-    let rem_len = remaining_length(lengths, &state.remaining);
-    let secondary_waste = (secondary_bars * stock_length).saturating_sub(rem_len);
-    let total_waste = selected_waste(state, stock_length) + secondary_waste;
-    let pattern_penalty = state.selected.len() as i64 * 100_000;
-
-    total_bars as i64 * 1_000_000_000
-        + secondary_bars as i64 * 80_000_000
-        + total_waste as i64 * 10_000
-        + pattern_penalty
-        + rem_len as i64
-}
-
-fn final_objective_score(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
-    let secondary_bars = estimate_secondary_bars_bfd(lengths, &state.remaining, stock_length);
-    let total_bars = state.stock_qty + secondary_bars;
-    let rem_len = remaining_length(lengths, &state.remaining);
-    let secondary_waste = (secondary_bars * stock_length).saturating_sub(rem_len);
-    let total_waste = selected_waste(state, stock_length) + secondary_waste;
-    let pattern_count = state.selected.len() as i64;
-
-    total_bars as i64 * 1_000_000_000
-        + secondary_bars as i64 * 100_000_000
-        + total_waste as i64 * 10_000
-        + pattern_count * 100
-}
-
-fn estimate_secondary_bars_fast(lengths: &[u32], remaining: &[u32], stock_length: u32) -> u32 {
-    let total = remaining_length(lengths, remaining);
-
-    if total == 0 {
-        0
-    } else {
-        (total + stock_length - 1) / stock_length
-    }
-}
-
-fn estimate_secondary_bars_bfd(lengths: &[u32], remaining: &[u32], stock_length: u32) -> u32 {
-    if remaining.iter().all(|&q| q == 0) {
-        0
-    } else {
-        best_fit_decreasing_fallback(lengths, remaining, stock_length).len() as u32
-    }
-}
-
-fn best_fit_decreasing_fallback(
-    lengths: &[u32],
-    remaining: &[u32],
-    stock_length: u32,
-) -> Vec<Candidate> {
-    let mut cuts = Vec::new();
-
-    for (i, &qty) in remaining.iter().enumerate() {
-        for _ in 0..qty {
-            cuts.push(i);
-        }
-    }
-
-    cuts.sort_by_key(|&i| std::cmp::Reverse(lengths[i]));
-
-    let mut bars: Vec<Candidate> = Vec::new();
-
-    for item_index in cuts {
-        let len = lengths[item_index];
-        let mut best_index: Option<usize> = None;
-        let mut best_remaining = u32::MAX;
-
-        for (bar_index, bar) in bars.iter().enumerate() {
-            if bar.used + len <= stock_length {
-                let rem = stock_length - (bar.used + len);
-
-                if rem < best_remaining {
-                    best_remaining = rem;
-                    best_index = Some(bar_index);
-                }
-            }
-        }
-
-        match best_index {
-            Some(bar_index) => {
-                bars[bar_index].counts[item_index] += 1;
-                bars[bar_index].used += len;
-            }
-            None => {
-                let mut counts = vec![0; lengths.len()];
-                counts[item_index] = 1;
-                bars.push(Candidate { counts, used: len });
-            }
-        }
-    }
-
-    bars
-}
-
-fn max_pattern_repeat(candidate: &Candidate, remaining: &[u32]) -> u32 {
-    let mut max_repeat = u32::MAX;
-
-    for i in 0..remaining.len() {
-        let c = candidate.counts[i];
-
+fn max_repeat(cand: &Candidate, remaining: &[u32; MAX_ITEMS], n: usize) -> u32 {
+    let mut max_rep = u32::MAX;
+    let mut has = false;
+    for i in 0..n {
+        let c = cand.counts[i] as u32;
         if c > 0 {
-            max_repeat = max_repeat.min(remaining[i] / c);
+            has = true;
+            max_rep = max_rep.min(remaining[i] / c);
         }
     }
+    if has { max_rep } else { 0 }
+}
 
-    if max_repeat == u32::MAX {
-        0
-    } else {
-        max_repeat
+fn make_trial_quantities(max_rep: u32, bundle_size: u32, out: &mut [u32; 8]) -> usize {
+    let mut count = 0usize;
+    let step = bundle_size.max(1);
+    let max_q = (max_rep / step) * step;
+    if max_q == 0 { return 0; }
+
+    push_u32_unique(out, &mut count, max_q);
+    push_u32_unique(out, &mut count, step);
+    push_u32_unique(out, &mut count, (max_q / 2 / step) * step);
+    if max_q > step { push_u32_unique(out, &mut count, max_q - step); }
+    if max_q >= step * 3 { push_u32_unique(out, &mut count, step * 2); }
+    if max_q >= step * 4 { push_u32_unique(out, &mut count, (max_q / 3 / step) * step); }
+    if max_q >= step * 4 { push_u32_unique(out, &mut count, ((max_q * 2) / 3 / step) * step); }
+
+    out[..count].sort_by_key(|&q| std::cmp::Reverse(q));
+    count
+}
+
+fn push_u32_unique(out: &mut [u32; 8], count: &mut usize, v: u32) {
+    if v == 0 || *count >= out.len() { return; }
+    for i in 0..*count {
+        if out[i] == v { return; }
+    }
+    out[*count] = v;
+    *count += 1;
+}
+
+fn subtract_candidate(remaining: &mut [u32; MAX_ITEMS], cand: &Candidate, q: u32, n: usize) -> bool {
+    for i in 0..n {
+        let need = cand.counts[i] as u32 * q;
+        if need > remaining[i] { return false; }
+    }
+    for i in 0..n {
+        remaining[i] -= cand.counts[i] as u32 * q;
+    }
+    true
+}
+
+fn add_selected(state: &mut SearchState, c_idx: usize, qty: u32) {
+    for i in 0..state.selected_len {
+        if state.selected[i].candidate_index as usize == c_idx {
+            state.selected[i].qty += qty;
+            return;
+        }
+    }
+    if state.selected_len < MAX_SELECTED_PATTERNS {
+        state.selected[state.selected_len] = SelectedPattern { candidate_index: c_idx as u16, qty };
+        state.selected_len += 1;
     }
 }
 
-fn push_candidate(
-    seen: &mut HashSet<Vec<u32>>,
-    candidates: &mut Vec<Candidate>,
-    candidate: Candidate,
-) {
-    if candidate.used == 0 {
-        return;
-    }
-
-    if seen.insert(candidate.counts.clone()) {
-        candidates.push(candidate);
-    }
-}
-
-fn add_or_merge_pattern(selected: &mut Vec<(Candidate, u32)>, candidate: Candidate, qty: u32) {
-    if qty == 0 {
-        return;
-    }
-
-    for (existing, existing_qty) in selected.iter_mut() {
-        if existing.counts == candidate.counts {
-            *existing_qty += qty;
+fn push_state_dedup(states: &mut [SearchState; MAX_STATES], count: &mut usize, state: SearchState, n: usize) {
+    for i in 0..*count {
+        if same_remaining(&states[i].remaining, &state.remaining, n) {
+            if state.score < states[i].score {
+                states[i] = state;
+            }
             return;
         }
     }
 
-    selected.push((candidate, qty));
-}
-
-fn remaining_length(lengths: &[u32], remaining: &[u32]) -> u32 {
-    lengths
-        .iter()
-        .zip(remaining.iter())
-        .map(|(l, q)| l * q)
-        .sum()
-}
-
-fn selected_used_length(state: &State) -> u32 {
-    state.selected.iter().map(|(p, q)| p.used * q).sum()
-}
-
-fn selected_waste(state: &State, stock_length: u32) -> u32 {
-    let selected_used = selected_used_length(state);
-    let selected_stock = state.stock_qty * stock_length;
-    selected_stock.saturating_sub(selected_used)
-}
-
-fn build_result(
-    primary_state: State,
-    fallback_bars: Vec<Candidate>,
-    items: &[Item],
-    stock_length: u32,
-    total_required: u32,
-    used_fallback: bool,
-) -> CuttingResult {
-    let mut map: HashMap<(Vec<u32>, bool), Pattern> = HashMap::new();
-
-    for (candidate, qty) in primary_state.selected {
-        insert_pattern(&mut map, candidate, qty, items, stock_length, false);
+    if *count < MAX_STATES {
+        states[*count] = state;
+        *count += 1;
+        return;
     }
 
-    for candidate in fallback_bars {
-        insert_pattern(&mut map, candidate, 1, items, stock_length, true);
+    // Replace current worst state if the new one is better.
+    let mut worst = 0usize;
+    for i in 1..MAX_STATES {
+        if states[i].score > states[worst].score { worst = i; }
     }
-
-    let mut patterns: Vec<Pattern> = map.into_values().collect();
-
-    patterns.sort_by_key(|p| {
-        (
-            p.is_fallback,
-            std::cmp::Reverse(p.qty),
-            p.waste,
-            std::cmp::Reverse(p.used_length),
-        )
-    });
-
-    let stock_qty: u32 = patterns.iter().map(|p| p.qty).sum();
-    let total_stock = stock_qty * stock_length;
-    let total_waste = total_stock.saturating_sub(total_required);
-
-    let percentage_wasted = if total_stock == 0 {
-        0.0
-    } else {
-        total_waste as f64 / total_stock as f64 * 100.0
-    };
-
-    CuttingResult {
-        patterns,
-        stock_qty,
-        percentage_wasted,
-        used_fallback,
+    if state.score < states[worst].score {
+        states[worst] = state;
     }
 }
 
-fn insert_pattern(
-    map: &mut HashMap<(Vec<u32>, bool), Pattern>,
-    candidate: Candidate,
-    qty: u32,
-    items: &[Item],
-    stock_length: u32,
-    is_fallback: bool,
-) {
-    map.entry((candidate.counts.clone(), is_fallback))
-        .and_modify(|p| {
-            p.qty += qty;
-        })
-        .or_insert_with(|| {
-            let mut cuts = Vec::new();
-            let mut sorted_indices: Vec<usize> = (0..items.len()).collect();
-            sorted_indices.sort_by_key(|&i| std::cmp::Reverse(items[i].length));
-
-            for i in sorted_indices {
-                let count = candidate.counts[i];
-
-                for _ in 0..count {
-                    cuts.push(format!("{} ({})", items[i].label, items[i].length));
-                }
-            }
-
-            Pattern {
-                cuts,
-                qty,
-                used_length: candidate.used,
-                waste: stock_length - candidate.used,
-                is_fallback,
-            }
-        });
-}
-
-fn is_done(remaining: &[u32]) -> bool {
-    remaining.iter().all(|&x| x == 0)
-}
-
-fn validate(items: &[Item], stock_length: u32, bundle_size: u32) -> Result<(), String> {
-    if stock_length == 0 {
-        return Err("stock_length must be greater than 0".to_string());
+fn same_remaining(a: &[u32; MAX_ITEMS], b: &[u32; MAX_ITEMS], n: usize) -> bool {
+    for i in 0..n {
+        if a[i] != b[i] { return false; }
     }
-
-    if bundle_size == 0 {
-        return Err("bundle_size must be greater than 0".to_string());
-    }
-
-    for item in items {
-        if item.length == 0 {
-            return Err(format!("Item '{}' has zero length", item.label));
-        }
-
-        if item.length > stock_length {
-            return Err(format!(
-                "Item '{}' length {} is longer than stock length {}",
-                item.label, item.length, stock_length
-            ));
-        }
-    }
-
-    Ok(())
+    true
 }
 
-struct Lcg {
-    state: u64,
+fn sort_states(states: &mut [SearchState; MAX_STATES], count: usize) {
+    states[..count].sort_by_key(|s| s.score);
 }
+
+fn all_done(remaining: &[u32; MAX_ITEMS], n: usize) -> bool {
+    for i in 0..n {
+        if remaining[i] != 0 { return false; }
+    }
+    true
+}
+
+fn remaining_length(lengths: &[u32; MAX_ITEMS], remaining: &[u32; MAX_ITEMS], n: usize) -> u32 {
+    let mut total = 0u32;
+    for i in 0..n {
+        total = total.saturating_add(lengths[i].saturating_mul(remaining[i]));
+    }
+    total
+}
+
+fn selected_used_length(state: &SearchState, lengths: &[u32; MAX_ITEMS], n: usize, stock_length: u32) -> u32 {
+    // Exact selected used length is not stored per state in order to keep state compact.
+    // Use stock-based lower-bound for scoring; final result is exact after rebuilding patterns.
+    let rem = remaining_length(lengths, &state.remaining, n);
+    let demand_total = 0u32.saturating_add(rem);
+    state.stock_qty.saturating_mul(stock_length).saturating_sub(demand_total)
+}
+
+fn estimate_fallback_bars(lengths: &[u32; MAX_ITEMS], remaining: &[u32; MAX_ITEMS], n: usize, stock_length: u32) -> u32 {
+    let total = remaining_length(lengths, remaining, n);
+    if total == 0 { 0 } else { (total + stock_length - 1) / stock_length }
+}
+
+fn final_score(state: &SearchState, lengths: &[u32; MAX_ITEMS], n: usize, stock_length: u32) -> i64 {
+    let fallback = estimate_fallback_bars(lengths, &state.remaining, n, stock_length);
+    let total_bars = state.stock_qty + fallback;
+    let rem_len = remaining_length(lengths, &state.remaining, n);
+    let fallback_waste = fallback.saturating_mul(stock_length).saturating_sub(rem_len);
+
+    // Priority:
+    // 1. lowest total bars
+    // 2. lowest fallback bars
+    // 3. lowest estimated waste
+    // 4. lower remaining length
+    total_bars as i64 * 1_000_000_000
+        + fallback as i64 * 100_000_000
+        + fallback_waste as i64 * 10_000
+        + rem_len as i64
+}
+
+fn sort_order_desc(order: &mut [usize; MAX_ITEMS], n: usize, lengths: &[u32; MAX_ITEMS]) {
+    order[..n].sort_by_key(|&i| std::cmp::Reverse(lengths[i]));
+}
+
+fn sort_order_qty_desc(order: &mut [usize; MAX_ITEMS], n: usize, qty: &[u32; MAX_ITEMS]) {
+    order[..n].sort_by_key(|&i| std::cmp::Reverse(qty[i]));
+}
+
+struct Lcg { state: u64 }
 
 impl Lcg {
-    fn new(seed: u64) -> Self {
-        Self { state: seed }
-    }
-
+    fn new(seed: u64) -> Self { Self { state: seed } }
     fn next_u32(&mut self) -> u32 {
-        self.state = self
-            .state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1);
-
+        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1);
         (self.state >> 32) as u32
     }
-
     fn next_usize(&mut self, max: usize) -> usize {
-        if max == 0 {
-            0
-        } else {
-            self.next_u32() as usize % max
-        }
+        if max == 0 { 0 } else { self.next_u32() as usize % max }
     }
 }
