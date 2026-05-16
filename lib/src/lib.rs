@@ -39,7 +39,7 @@ struct State {
     stock_qty: u32,
 }
 
-const MAX_PRIMARY_PATTERNS: usize = 6;
+const MAX_PRIMARY_PATTERNS: usize = 7;
 const BEAM_WIDTH: usize = 200;
 const CANDIDATES_PER_STATE: usize = 80;
 const RANDOM_CANDIDATE_COUNT: usize = 80;
