@@ -693,12 +693,6 @@ fn final_objective_score(state: &State, lengths: &[u32], stock_length: u32, bund
         + non_bundle_primary_qty as i64
 }
 
-fn score_partial_progress(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
-    // Kept for compatibility/debug use. The solver now uses final_objective_score
-    // when updating best_state.
-    final_objective_score(state, lengths, stock_length, 1)
-}
-
 fn build_result(
     primary_state: State,
     fallback_bars: Vec<Candidate>,
