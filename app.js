@@ -1,6 +1,6 @@
 import initWasm, { compute_cutting_plan } from './lib/pkg/steel_cutting_wasm.js';
 
-const MAX_PRIMARY_PATTERNS = 4;
+
 
 /* ── DOM refs ── */
 let elements = {};
@@ -369,7 +369,7 @@ async function calculate() {
         qty: row.qty_needed,
     }));
 
-    const result = state.computeCuttingPlan(items, stockLength, MAX_PRIMARY_PATTERNS, bundleSize);
+    const result = state.computeCuttingPlan(items, stockLength, bundleSize);
 
 
     renderResults(result, stockLength);

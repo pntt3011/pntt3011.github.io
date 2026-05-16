@@ -44,7 +44,6 @@ struct State {
 pub fn compute_cutting_plan(
     items: JsValue,
     stock_length: u32,
-    max_primary_patterns: usize,
     bundle_size: u32,
 ) -> Result<JsValue, JsValue> {
     let items: Vec<Item> = serde_wasm_bindgen::from_value(items)
@@ -68,7 +67,7 @@ pub fn compute_cutting_plan(
     grouped_items.sort_by_key(|i| std::cmp::Reverse(i.length));
 
     // --- Run solver on grouped items ---
-    let mut result = compute_with_fallback(&grouped_items, stock_length, max_primary_patterns, bundle_size)
+    let mut result = compute_with_fallback(&grouped_items, stock_length, bundle_size)
         .map_err(|e| JsValue::from_str(&e))?;
 
     // --- Post-process: Repopulate original labels ---
@@ -154,7 +153,6 @@ pub fn compute_cutting_plan(
 pub fn compute_with_fallback(
     items: &[Item],
     stock_length: u32,
-    max_primary_patterns: usize,
     bundle_size: u32,
 ) -> Result<CuttingResult, String> {
     validate(items, stock_length, bundle_size)?;
@@ -178,7 +176,6 @@ pub fn compute_with_fallback(
         &lengths,
         &primary_demand,
         stock_length,
-        max_primary_patterns,
         bundle_size,
     );
 
@@ -210,7 +207,6 @@ fn solve_primary_patterns(
     lengths: &[u32],
     demand: &[u32],
     stock_length: u32,
-    max_patterns: usize,
     bundle_size: u32,
 ) -> State {
     let mut beam = vec![State {
@@ -224,7 +220,7 @@ fn solve_primary_patterns(
     let beam_width = 300;
     let candidates_per_state = 120;
 
-    for _ in 0..max_patterns {
+    loop {
         let mut next_states = Vec::new();
 
         for state in &beam {
@@ -566,8 +562,6 @@ fn score_state(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
     let estimated_secondary_bars =
         estimate_secondary_bars_bfd(lengths, &state.remaining, stock_length);
 
-    let estimated_total_bars = state.stock_qty + estimated_secondary_bars;
-
     let selected_used: u32 = state
         .selected
         .iter()
@@ -588,26 +582,14 @@ fn score_state(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
 
     let estimated_total_waste = selected_waste + estimated_secondary_waste;
 
-    let long_remaining_penalty: u32 = lengths
-        .iter()
-        .zip(state.remaining.iter())
-        .map(|(l, q)| l * q)
-        .sum();
-
-    let primary_pattern_count = state.selected.len() as u32;
-
-    estimated_total_bars as i64 * 100_000_000
+    state.stock_qty as i64 * 100_000_000
         + estimated_secondary_bars as i64 * 10_000_000
         + estimated_total_waste as i64 * 10_000
-        + long_remaining_penalty as i64 * 100
-        + primary_pattern_count as i64 * 1_000
 }
 
 fn score_partial_progress(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
     let estimated_secondary_bars =
         estimate_secondary_bars_bfd(lengths, &state.remaining, stock_length);
-
-    let estimated_total_bars = state.stock_qty + estimated_secondary_bars;
 
     let remaining_length: u32 = lengths
         .iter()
@@ -618,10 +600,9 @@ fn score_partial_progress(state: &State, lengths: &[u32], stock_length: u32) -> 
     let estimated_secondary_stock = estimated_secondary_bars * stock_length;
     let estimated_secondary_waste = estimated_secondary_stock.saturating_sub(remaining_length);
 
-    estimated_total_bars as i64 * 100_000_000
+    state.stock_qty as i64 * 100_000_000
         + estimated_secondary_bars as i64 * 10_000_000
         + estimated_secondary_waste as i64 * 10_000
-        + remaining_length as i64 * 100
 }
 
 fn build_result(
