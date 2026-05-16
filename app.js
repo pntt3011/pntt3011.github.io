@@ -80,7 +80,6 @@ function bindEvents() {
             refreshSelectors();
             populateAllMatchingComponents();
             renderResults([]);
-            updateCalculateState();
         });
     });
 
@@ -454,6 +453,7 @@ function populateAllMatchingComponents() {
         qty_needed: Number(record.qty_needed),
     }));
     renderSelectedRows();
+    updateCalculateState();
 }
 
 /* ── Utilities ── */
