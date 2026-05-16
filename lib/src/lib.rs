@@ -551,11 +551,17 @@ fn estimate_secondary_bars_bfd(
     remaining: &[u32],
     stock_length: u32,
 ) -> u32 {
-    if remaining.iter().all(|&q| q == 0) {
-        return 0;
-    }
+    let remaining_length: u32 = lengths
+        .iter()
+        .zip(remaining.iter())
+        .map(|(l, q)| l * q)
+        .sum();
 
-    best_fit_fallback(lengths, remaining, stock_length).len() as u32
+    if remaining_length == 0 {
+        0
+    } else {
+        (remaining_length + stock_length - 1) / stock_length
+    }
 }
 
 fn score_state(state: &State, lengths: &[u32], stock_length: u32) -> i64 {
