@@ -136,7 +136,7 @@ async function loadData() {
     if (!Array.isArray(state.records)) throw new Error("cutting_components.json must contain an array");
 
     const orders = uniqueSorted(state.records.map(r => r.order_name));
-    setOptions(elements.orderNameMaterialSelect, [option("Chọn đơn hàng…", ""), ...orders.map(v => option(v, v))]);
+    setOptions(elements.orderNameMaterialSelect, [option("Chọn LSX…", ""), ...orders.map(v => option(v, v))]);
 }
 
 /* ── Status ── */
@@ -431,6 +431,11 @@ function renderResults(result, stockLength = 0) {
 
     fragment.querySelector("h3").textContent = "Kế hoạch cắt đề xuất";
 
+    const exportBtn = fragment.querySelector(".export-btn");
+    if (exportBtn) {
+        exportBtn.addEventListener("click", () => exportToExcel(result, stockLength));
+    }
+
     // Summary calculation
     let totalBars = 0;
     let totalWaste = 0;
@@ -542,4 +547,86 @@ function openHelpModal() {
 function closeHelpModal() {
     elements.helpModal.classList.remove("active");
     document.body.style.overflow = ""; // Re-enable scrolling
+}
+
+/* ── Export to Excel Handlers ── */
+function exportToExcel(result, stockLength) {
+    if (!result || !Array.isArray(result.patterns) || typeof XLSX === "undefined") {
+        console.error("XLSX library is not loaded or results are empty.");
+        return;
+    }
+
+    const rows = [];
+
+    // Summary metadata
+    rows.push(["TIÊU ĐỀ", "KẾ HOẠCH CẮT PHÔI TỐI ƯU"]);
+    rows.push([]);
+    rows.push(["TỔNG HỢP"]);
+    
+    let totalBars = 0;
+    let totalWaste = 0;
+    for (const p of result.patterns) {
+        totalBars += p.qty;
+        totalWaste += (p.qty * p.waste);
+    }
+    
+    rows.push(["Tổng số phôi sử dụng", totalBars, "cây phôi"]);
+    rows.push(["Tổng lượng dư thừa (hao hụt)", totalWaste, "mm"]);
+    rows.push(["Tỷ lệ dư thừa", Number(result.percentage_wasted.toFixed(2)), "%"]);
+    rows.push([]);
+    
+    // Details header
+    rows.push(["CHI TIẾT KẾ HOẠCH CẮT"]);
+    
+    const detailHeaders = [
+        "Mẫu cắt"
+    ];
+    result.lengths.forEach(len => {
+        detailHeaders.push(`${len} mm`);
+    });
+    detailHeaders.push("Dư thừa (mm)", "Chiều dài phôi gốc (mm)", "Số lượng phôi");
+    rows.push(detailHeaders);
+
+    // Data rows
+    let patternIndex = 1;
+    for (const pattern of result.patterns) {
+        const patternName = `Mẫu cắt ${patternIndex++}${pattern.is_secondary ? ' (cắt cơ)' : ''}`;
+        
+        const rowData = [
+            patternName
+        ];
+        
+        result.lengths.forEach((len, idx) => {
+            const count = pattern.counts[idx];
+            rowData.push(count || 0);
+        });
+        
+        rowData.push(pattern.waste, stockLength, pattern.qty);
+        rows.push(rowData);
+    }
+
+    // Create Sheet
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    
+    // Create Workbook
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "KeHoachCat");
+
+    // Format column widths for readability dynamically
+    const colWidths = [
+        { wch: 22 } // Mẫu cắt
+    ];
+    result.lengths.forEach(() => {
+        colWidths.push({ wch: 15 }); // Unique length columns
+    });
+    colWidths.push(
+        { wch: 18 }, // Dư thừa
+        { wch: 25 }, // Chiều dài phôi gốc
+        { wch: 20 }  // Số lượng phôi
+    );
+    ws["!cols"] = colWidths;
+
+    // Trigger download
+    const fileName = `KeHoachCat_${new Date().toISOString().slice(0,10)}.xlsx`;
+    XLSX.writeFile(wb, fileName);
 }
