@@ -62,7 +62,7 @@ button, input, select { font: inherit; }
 
 h1 {
   font-size: clamp(1.4rem, 3vw, 2rem);
-  font-weight: 800;
+  font-weight: 500;
   letter-spacing: -0.5px;
   line-height: 1;
 }
@@ -98,10 +98,13 @@ h2.section-title {
 .meta-line { color: var(--muted); font-size: 0.85rem; }
 
 /* ── Material row ── */
-.material-row {
+.material-row-3 {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
+}
+.material-row-3:not(:last-child) {
+  margin-bottom: 16px;
 }
 
 /* ── Label / Input / Select ── */
@@ -420,7 +423,7 @@ select:disabled { opacity: 0.5; cursor: not-allowed; background: #f1f5f9; }
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
-  .material-row { grid-template-columns: 1fr; }
+  .material-row-3 { grid-template-columns: 1fr; }
   .picker-row { grid-template-columns: 1fr 1fr; }
   .picker-row .reset-btn { grid-column: 1 / -1; justify-self: start; }
   .topbar { flex-direction: column; align-items: flex-start; gap: 8px; }
@@ -429,4 +432,170 @@ select:disabled { opacity: 0.5; cursor: not-allowed; background: #f1f5f9; }
 
 @media (max-width: 480px) {
   .picker-row { grid-template-columns: 1fr; }
+}
+
+/* ── Help Button & Modal ── */
+.help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 14px;
+  height: 34px;
+  border: 1.5px solid var(--card-border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.help-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+}
+
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(15, 23, 42, 0.3);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 16px;
+}
+.modal-backdrop.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.modal-card {
+  width: min(600px, 100%);
+  max-height: min(780px, calc(100vh - 32px));
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--shadow-md);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  transform: scale(0.95) translateY(10px);
+  opacity: 0;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+.modal-backdrop.active .modal-card {
+  transform: scale(1) translateY(0);
+  opacity: 1;
+}
+
+.modal-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--card-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.modal-header h2 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: #f1f5f9;
+  color: var(--muted);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+.close-btn:hover {
+  background: #fee2e2;
+  color: var(--danger);
+  transform: rotate(90deg);
+}
+
+.modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* ── Step-by-Step Guide ── */
+.step-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.step-item {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.step-number {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.85rem;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.05);
+}
+
+.step-content {
+  flex: 1;
+}
+.step-content h3 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 6px 0;
+}
+.step-content p {
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0 0 8px 0;
+}
+.step-content p:last-child {
+  margin-bottom: 0;
+}
+
+.step-content .tip-text {
+  background: #f8fafc;
+  border: 1px solid var(--card-border);
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  color: #475569;
+  margin-top: 10px;
+  line-height: 1.4;
 }

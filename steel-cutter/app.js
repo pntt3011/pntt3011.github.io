@@ -21,7 +21,6 @@ async function boot() {
     // 1. Initialize elements (only after DOM is ready)
     elements = {
         datasetStatus: document.getElementById("datasetStatus"),
-        matchCount: document.getElementById("matchCount"),
         orderNameMaterialSelect: document.getElementById("orderNameMaterialSelect"),
         lengthOfBoxCm: document.getElementById("lengthOfBoxCm"),
         widthOfBoxCm: document.getElementById("widthOfBoxCm"),
@@ -35,6 +34,10 @@ async function boot() {
         selectedListBody: document.getElementById("selectedListBody"),
         calculateButton: document.getElementById("calculateButton"),
         resultList: document.getElementById("resultList"),
+        resultsSection: document.getElementById("resultsSection"),
+        helpButton: document.getElementById("helpButton"),
+        helpModal: document.getElementById("helpModal"),
+        closeModalButton: document.getElementById("closeModalButton"),
         selectedRowTemplate: document.getElementById("selectedRowTemplate"),
         resultCardTemplate: document.getElementById("resultCardTemplate"),
     };
@@ -44,7 +47,7 @@ async function boot() {
         await init();
     } catch (error) {
         console.error("Initialization failed:", error);
-        setStatus("error", `Failed to initialize: ${error.message}`);
+        setStatus("error", `Lỗi khởi tạo: ${error.message}`);
     }
 }
 
@@ -60,7 +63,7 @@ async function init() {
     bindEvents();
     await loadData();
     await loadWasm();
-    setStatus("ready", "Ready");
+    setStatus("ready", "Sẵn sàng");
     refreshSelectors();
     populateAllMatchingComponents();
     renderResults([]);
@@ -111,6 +114,18 @@ function bindEvents() {
     // Stock-length input
     elements.materialLengthCm.addEventListener("input", updateCalculateState);
     elements.bundleSize.addEventListener("input", updateCalculateState);
+
+    // Help Modal events
+    elements.helpButton.addEventListener("click", openHelpModal);
+    elements.closeModalButton.addEventListener("click", closeHelpModal);
+    elements.helpModal.addEventListener("click", (e) => {
+        if (e.target === elements.helpModal) closeHelpModal();
+    });
+    window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && elements.helpModal.classList.contains("active")) {
+            closeHelpModal();
+        }
+    });
 }
 
 /* ── Data loading ── */
@@ -121,7 +136,7 @@ async function loadData() {
     if (!Array.isArray(state.records)) throw new Error("cutting_components.json must contain an array");
 
     const orders = uniqueSorted(state.records.map(r => r.order_name));
-    setOptions(elements.orderNameMaterialSelect, [option("Select Order…", ""), ...orders.map(v => option(v, v))]);
+    setOptions(elements.orderNameMaterialSelect, [option("Chọn đơn hàng…", ""), ...orders.map(v => option(v, v))]);
 }
 
 /* ── Status ── */
@@ -180,7 +195,7 @@ function refreshSelectors() {
     // Recompute filtered records
     const finalL = numberValue(elements.lengthOfBoxCm);
     const finalW = numberValue(elements.widthOfBoxCm);
-    
+
     if (orderName && finalL != null && finalW != null) {
         state.filteredRecords = orderRecords.filter(r =>
             Number(r.lengthOfBoxCm) === finalL && Number(r.widthOfBoxCm) === finalW
@@ -194,13 +209,12 @@ function refreshSelectors() {
 }
 
 function updateMatchCount() {
-    const count = state.filteredRecords.length;
-    elements.matchCount.textContent = `${count} matching components`;
+    // Match count element removed
 }
 
 function syncAddRowOptions() {
     if (state.filteredRecords.length === 0) {
-        setOptions(elements.lengthSelect, [option("Length…", "")], true);
+        setOptions(elements.lengthSelect, [option("Chiều dài…", "")], true);
         if (!elements.customModeCheckbox.checked) {
             elements.addRowQtyInput.value = "";
             elements.addRowQtyInput.disabled = true;
@@ -210,15 +224,15 @@ function syncAddRowOptions() {
     }
 
     const lengths = unique(state.filteredRecords.map(r => Number(r.lengthOfDetailCm)));
-    setOptions(elements.lengthSelect, [option("Length…", ""), ...lengths.map(v => option(String(v), String(v)))], false);
-    
+    setOptions(elements.lengthSelect, [option("Chiều dài…", ""), ...lengths.map(v => option(String(v), String(v)))], false);
+
     // Auto-select if only 1
     if (lengths.length === 1) {
         elements.lengthSelect.value = String(lengths[0]);
     } else {
         elements.lengthSelect.value = "";
     }
-    
+
     if (!elements.customModeCheckbox.checked) {
         syncAddRow();
     }
@@ -309,7 +323,7 @@ function addSelectedLength() {
 
     renderSelectedRows();
     updateCalculateState();
-    
+
     if (isCustom) {
         elements.customLengthInput.value = "";
         elements.addRowQtyInput.value = "";
@@ -389,23 +403,33 @@ async function calculate() {
     try {
         const result = state.computeCuttingPlan(input);
         renderResults(result, stockLength);
+
+        // Auto-scroll to results exactly after the browser has completed the next layout reflow and repaint
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                const rect = elements.resultsSection.getBoundingClientRect();
+                if (rect.top > 0) {
+                    elements.resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
+                }
+            });
+        });
     } catch (err) {
         console.error(err);
-        elements.resultList.innerHTML = `<p class="meta-line status-pill--error">Error: ${err}</p>`;
+        elements.resultList.innerHTML = `<p class="meta-line status-pill--error">Lỗi: ${err}</p>`;
     }
 }
 
 /* ── Render results ── */
 function renderResults(result, stockLength = 0) {
     if (!result || !Array.isArray(result.patterns) || result.patterns.length === 0) {
-        elements.resultList.innerHTML = '<p class="meta-line">No result yet.</p>';
+        elements.resultList.innerHTML = '<p class="meta-line">Chưa có kết quả.</p>';
         return;
     }
 
     elements.resultList.innerHTML = "";
     const fragment = elements.resultCardTemplate.content.cloneNode(true);
 
-    fragment.querySelector("h3").textContent = "Recommended plan";
+    fragment.querySelector("h3").textContent = "Kế hoạch cắt đề xuất";
 
     // Summary calculation
     let totalBars = 0;
@@ -417,9 +441,9 @@ function renderResults(result, stockLength = 0) {
 
     const meta = fragment.querySelector(".result-meta");
     meta.innerHTML = `
-        <strong>${totalBars}</strong> bars used &nbsp;·&nbsp; 
-        <strong>${totalWaste}</strong> mm waste &nbsp;·&nbsp;
-        <strong>${result.percentage_wasted.toFixed(2)}</strong> % waste
+        <strong>${totalBars}</strong> phôi sử dụng &nbsp;·&nbsp; 
+        <strong>${totalWaste}</strong> mm dư thừa &nbsp;·&nbsp;
+        <strong>${result.percentage_wasted.toFixed(2)}</strong> % dư thừa
     `;
 
     const list = fragment.querySelector(".pattern-list");
@@ -432,13 +456,13 @@ function renderResults(result, stockLength = 0) {
         // Pattern Header: "Pattern 1 × 198"
         const header = document.createElement("div");
         header.className = "pattern-header";
-        const secondarySuffix = pattern.is_secondary ? ' <small>(secondary)</small>' : '';
-        header.innerHTML = `<strong>Pattern ${patternIndex++}${secondarySuffix}</strong> <span class="pattern-qty">× ${pattern.qty}</span>`;
+        const secondarySuffix = pattern.is_secondary ? ' <small>(cắt cơ)</small>' : '';
+        header.innerHTML = `<strong>Mẫu cắt ${patternIndex++}${secondarySuffix}</strong> <span class="pattern-qty">× ${pattern.qty}</span>`;
         item.appendChild(header);
 
         const subList = document.createElement("ul");
         subList.className = "pattern-sublist";
-        
+
         result.lengths.forEach((len, idx) => {
             const count = pattern.counts[idx];
             if (count > 0) {
@@ -447,14 +471,14 @@ function renderResults(result, stockLength = 0) {
                 subList.appendChild(li);
             }
         });
-        
+
         item.appendChild(subList);
 
         // Footer: Waste and Length info
         const footer = document.createElement("div");
         footer.className = "pattern-footer";
         footer.innerHTML = `
-            <span class="waste-tag">waste ${pattern.waste} mm of ${stockLength} mm</span>
+            <span class="waste-tag">dư ${pattern.waste} mm trong ${stockLength} mm</span>
         `;
         item.appendChild(footer);
 
@@ -471,13 +495,13 @@ function populateAllMatchingComponents() {
         const qty = Number(record.qty_needed);
         grouped[len] = (grouped[len] || 0) + qty;
     }
-    
+
     state.selectedRows = Object.keys(grouped).map(len => ({
         key: String(len),
         lengthOfDetailCm: Number(len),
         qty_needed: grouped[len],
     })).sort((a, b) => b.lengthOfDetailCm - a.lengthOfDetailCm);
-    
+
     renderSelectedRows();
     updateCalculateState();
 }
@@ -507,4 +531,15 @@ function unique(values) {
 
 function uniqueSorted(values) {
     return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b, "en"));
+}
+
+/* ── Help Modal Handlers ── */
+function openHelpModal() {
+    elements.helpModal.classList.add("active");
+    document.body.style.overflow = "hidden"; // Prevent scrolling behind modal
+}
+
+function closeHelpModal() {
+    elements.helpModal.classList.remove("active");
+    document.body.style.overflow = ""; // Re-enable scrolling
 }

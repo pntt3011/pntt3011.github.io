@@ -4,9 +4,9 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Steel Cutter Calculator</title>
+    <title>Phần mềm cắt phôi</title>
     <meta name="description"
-        content="Steel cutting stock optimizer — select box dimensions, add components, and compute the optimal cut plan." />
+        content="Công cụ tối ưu hóa cắt thép — chọn kích thước hộp, thêm chi tiết, và tính toán kế hoạch cắt tối ưu." />
     <link rel="stylesheet" href="./styles.css" />
 </head>
 
@@ -15,43 +15,54 @@
 
         <!-- ── Header ── -->
         <header class="topbar">
-            <h1>Steel Cutter Calculator</h1>
-            <div class="hero-meta">
-                <span id="datasetStatus" class="status-pill status-pill--loading">Loading…</span>
-                <span id="matchCount" class="meta-line">0 matching components</span>
+            <h1 style="display: flex; align-items: center; gap: 20px;">
+                <img src="logo.png" alt="Logo" style="width: 80px; height: 80px; object-fit: contain;" />
+                Phần mềm cắt phôi
+            </h1>
+            <div class="hero-meta" style="display: flex; align-items: center; gap: 10px;">
+                <span id="datasetStatus" class="status-pill status-pill--loading">Đang tải…</span>
+                <button id="helpButton" class="help-btn" aria-label="Hướng dẫn sử dụng" title="Hướng dẫn sử dụng">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                    <span>Hướng dẫn</span>
+                </button>
             </div>
         </header>
 
         <!-- ── Material ── -->
         <section class="card section-material">
-            <h2 class="section-title">Material</h2>
-            <div class="material-row">
+            <h2 class="section-title">Vật Liệu</h2>
+            <div class="material-row-3">
                 <label>
-                    <span>Order name</span>
+                    <span>Tên đơn hàng</span>
                     <select id="orderNameMaterialSelect">
-                        <option value="">Select Order…</option>
+                        <option value="">Chọn đơn hàng…</option>
                     </select>
                 </label>
                 <label>
-                    <span>Stock length</span>
-                    <input id="materialLengthCm" type="number" min="1" step="1" value="6000" />
-                </label>
-            </div>
-            <div class="material-row">
-                <label>
-                    <span>Box length</span>
+                    <span>Chiều dài hộp</span>
                     <select id="lengthOfBoxCm" disabled>
                         <option value="">…</option>
                     </select>
                 </label>
                 <label>
-                    <span>Box width</span>
+                    <span>Chiều rộng hộp</span>
                     <select id="widthOfBoxCm" disabled>
                         <option value="">…</option>
                     </select>
                 </label>
+            </div>
+            <div class="material-row-3">
                 <label>
-                    <span>Bundle size</span>
+                    <span>Chiều dài phôi</span>
+                    <input id="materialLengthCm" type="number" min="1" step="1" value="6000" />
+                </label>
+                <label>
+                    <span>Kích thước bó</span>
                     <input id="bundleSize" type="number" min="1" step="1" value="10" />
                 </label>
             </div>
@@ -60,9 +71,11 @@
         <!-- ── Components ── -->
         <section class="card section-components">
             <h2 class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
-                Components
-                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.7rem; font-weight: 600; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);">
-                    <input type="checkbox" id="customModeCheckbox" style="width: auto; margin: 0; cursor: pointer;"> Custom mode
+                Chi Tiết
+                <label
+                    style="display: flex; align-items: center; gap: 6px; font-size: 0.7rem; font-weight: 600; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);">
+                    <input type="checkbox" id="customModeCheckbox" style="width: auto; margin: 0; cursor: pointer;"> Tùy
+                    chỉnh
                 </label>
             </h2>
 
@@ -72,8 +85,8 @@
                     <thead>
                         <tr>
                             <th>#</th>
-                            <th>Length (mm)</th>
-                            <th>QTY</th>
+                            <th>Chiều dài (mm)</th>
+                            <th>SL</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -83,15 +96,17 @@
                             <td></td>
                             <td>
                                 <select id="lengthSelect" class="inline-select" disabled>
-                                    <option value="">Length…</option>
+                                    <option value="">Chiều dài…</option>
                                 </select>
-                                <input id="customLengthInput" type="number" class="inline-select" placeholder="Length (mm)" style="display: none;" min="1" step="1" />
+                                <input id="customLengthInput" type="number" class="inline-select"
+                                    placeholder="Chiều dài (mm)" style="display: none;" min="1" step="1" />
                             </td>
                             <td>
                                 <input id="addRowQtyInput" type="number" class="qty-input" min="1" step="1" disabled />
                             </td>
                             <td>
-                                <button id="addComponentButton" type="button" class="primary-button inline-btn" disabled>Add</button>
+                                <button id="addComponentButton" type="button" class="primary-button inline-btn"
+                                    disabled>Thêm</button>
                             </td>
                         </tr>
                     </tfoot>
@@ -101,14 +116,14 @@
             <!-- Calculate button inside Components card -->
             <div class="components-footer">
                 <button id="calculateButton" type="button" class="primary-button calculate-btn" disabled>
-                    Calculate
+                    Tính Toán
                 </button>
             </div>
         </section>
 
         <!-- ── Results ── -->
         <section class="card section-results" id="resultsSection">
-            <h2 class="section-title">Results</h2>
+            <h2 class="section-title">Kết Quả</h2>
             <div id="resultList" class="results-grid"></div>
         </section>
 
@@ -123,7 +138,7 @@
                 <input class="qty-input" type="number" min="1" step="1" />
             </td>
             <td class="remove-cell">
-                <button type="button" class="remove-btn" aria-label="Remove row" title="Remove">
+                <button type="button" class="remove-btn" aria-label="Xóa dòng" title="Xóa">
                     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2"
                         stroke-linecap="round">
                         <line x1="3" y1="8" x2="13" y2="8" />
@@ -141,6 +156,62 @@
             <ul class="pattern-list"></ul>
         </div>
     </template>
+
+    <!-- ── Modal Hướng Dẫn Sử Dụng ── -->
+    <div id="helpModal" class="modal-backdrop">
+        <div class="modal-card">
+            <header class="modal-header">
+                <h2>Hướng Dẫn Sử Dụng</h2>
+                <button id="closeModalButton" class="close-btn" aria-label="Đóng" title="Đóng">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </header>
+            <div class="modal-body">
+                <div class="step-guide">
+                    <div class="step-item">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h3>Chọn Vật Liệu</h3>
+                            <p>Chọn <strong>Tên đơn hàng</strong> để hệ thống tự động tải danh sách chiều dài hộp, chiều
+                                rộng hộp phù hợp từ cơ sở dữ liệu. Nhập <strong>Chiều dài phôi</strong> (mặc định
+                                6000mm) và <strong>Kích thước bó</strong> (1 nếu cắt laser/cắt cơ, > 1 nếu cắt CNC).</p>
+                        </div>
+                    </div>
+                    <div class="step-item">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h3>Thêm Chi Tiết Cần Cắt</h3>
+                            <p>Chọn <strong>Chiều dài</strong> và nhập <strong>Số lượng (SL)</strong> tương ứng từ dữ
+                                liệu mẫu, rồi ấn nút <strong>Thêm</strong>.</p>
+                            <p class="tip-text">💡 <strong>Mẹo:</strong> Bật chế độ <strong>Tùy chỉnh</strong> để tự do
+                                nhập bất kỳ chiều dài chi tiết nào thay vì chọn từ danh sách có sẵn.</p>
+                        </div>
+                    </div>
+                    <div class="step-item">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h3>Tính Toán Kế Hoạch</h3>
+                            <p>Kiểm tra lại danh sách chi tiết đã thêm trong bảng bên dưới. Sau đó, ấn nút <strong>Tính
+                                    Toán</strong> ở cuối danh sách.</p>
+                        </div>
+                    </div>
+                    <div class="step-item">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <h3>Xem Kết Quả</h3>
+                            <p>Trang sẽ tự động cuộn xuống phần <strong>Kết Quả</strong>. Tại đây bạn sẽ thấy số lượng
+                                cây phôi cần dùng, tổng lượng hao hụt (dư thừa) bằng mm và phần trăm hao hụt, kèm theo
+                                sơ đồ phân bổ cắt tối ưu nhất cho từng mẫu.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script type="module" src="./app.js"></script>
 </body>
