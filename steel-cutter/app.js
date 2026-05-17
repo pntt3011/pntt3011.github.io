@@ -28,6 +28,8 @@ async function boot() {
         materialLengthCm: document.getElementById("materialLengthCm"),
         bundleSize: document.getElementById("bundleSize"),
         lengthSelect: document.getElementById("lengthSelect"),
+        customLengthInput: document.getElementById("customLengthInput"),
+        customModeCheckbox: document.getElementById("customModeCheckbox"),
         addRowQtyInput: document.getElementById("addRowQtyInput"),
         addComponentButton: document.getElementById("addComponentButton"),
         selectedListBody: document.getElementById("selectedListBody"),
@@ -93,6 +95,14 @@ function bindEvents() {
 
     elements.addComponentButton.addEventListener("click", () => {
         addSelectedLength();
+    });
+
+    elements.customModeCheckbox.addEventListener("change", toggleCustomMode);
+    elements.customLengthInput.addEventListener("input", syncCustomAddRow);
+    elements.addRowQtyInput.addEventListener("input", () => {
+        if (elements.customModeCheckbox.checked) {
+            syncCustomAddRow();
+        }
     });
 
     // Calculate
@@ -191,9 +201,11 @@ function updateMatchCount() {
 function syncAddRowOptions() {
     if (state.filteredRecords.length === 0) {
         setOptions(elements.lengthSelect, [option("Length…", "")], true);
-        elements.addRowQtyInput.value = "";
-        elements.addRowQtyInput.disabled = true;
-        elements.addComponentButton.disabled = true;
+        if (!elements.customModeCheckbox.checked) {
+            elements.addRowQtyInput.value = "";
+            elements.addRowQtyInput.disabled = true;
+            elements.addComponentButton.disabled = true;
+        }
         return;
     }
 
@@ -206,10 +218,15 @@ function syncAddRowOptions() {
     } else {
         elements.lengthSelect.value = "";
     }
-    syncAddRow();
+    
+    if (!elements.customModeCheckbox.checked) {
+        syncAddRow();
+    }
 }
 
 function syncAddRow() {
+    if (elements.customModeCheckbox.checked) return;
+
     const len = numberValue(elements.lengthSelect);
     if (len == null) {
         elements.addRowQtyInput.value = "";
@@ -235,15 +252,50 @@ function resetPicker() {
     syncAddRow();
 }
 
+function toggleCustomMode() {
+    const isCustom = elements.customModeCheckbox.checked;
+    if (isCustom) {
+        elements.lengthSelect.style.display = "none";
+        elements.customLengthInput.style.display = "";
+        elements.customLengthInput.value = "";
+        elements.addRowQtyInput.value = "";
+        elements.addRowQtyInput.disabled = false;
+        elements.addComponentButton.disabled = true;
+        elements.customLengthInput.focus();
+    } else {
+        elements.lengthSelect.style.display = "";
+        elements.customLengthInput.style.display = "none";
+        syncAddRowOptions();
+    }
+}
+
+function syncCustomAddRow() {
+    const len = numberValue(elements.customLengthInput);
+    const qty = numberValue(elements.addRowQtyInput);
+    if (len != null && len > 0 && qty != null && qty > 0) {
+        elements.addComponentButton.disabled = false;
+    } else {
+        elements.addComponentButton.disabled = true;
+    }
+}
+
 function addSelectedLength() {
-    const len = numberValue(elements.lengthSelect);
+    const isCustom = elements.customModeCheckbox.checked;
+    const len = isCustom ? numberValue(elements.customLengthInput) : numberValue(elements.lengthSelect);
     const qty = numberValue(elements.addRowQtyInput);
     if (len == null || qty == null || qty < 1) return;
 
     const key = String(len);
     if (state.selectedRows.some(row => row.key === key)) {
         highlightRow(key);
-        resetPicker();
+        if (isCustom) {
+            elements.customLengthInput.value = "";
+            elements.addRowQtyInput.value = "";
+            elements.addComponentButton.disabled = true;
+            elements.customLengthInput.focus();
+        } else {
+            resetPicker();
+        }
         return;
     }
 
@@ -257,7 +309,15 @@ function addSelectedLength() {
 
     renderSelectedRows();
     updateCalculateState();
-    resetPicker();
+    
+    if (isCustom) {
+        elements.customLengthInput.value = "";
+        elements.addRowQtyInput.value = "";
+        elements.addComponentButton.disabled = true;
+        elements.customLengthInput.focus();
+    } else {
+        resetPicker();
+    }
 }
 
 function highlightRow(key) {

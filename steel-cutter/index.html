@@ -59,7 +59,12 @@
 
         <!-- ── Components ── -->
         <section class="card section-components">
-            <h2 class="section-title">Components</h2>
+            <h2 class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+                Components
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.7rem; font-weight: 600; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);">
+                    <input type="checkbox" id="customModeCheckbox" style="width: auto; margin: 0; cursor: pointer;"> Custom mode
+                </label>
+            </h2>
 
             <!-- Inline cut list table (add row lives in tfoot) -->
             <div class="table-wrap">
@@ -80,6 +85,7 @@
                                 <select id="lengthSelect" class="inline-select" disabled>
                                     <option value="">Length…</option>
                                 </select>
+                                <input id="customLengthInput" type="number" class="inline-select" placeholder="Length (mm)" style="display: none;" min="1" step="1" />
                             </td>
                             <td>
                                 <input id="addRowQtyInput" type="number" class="qty-input" min="1" step="1" disabled />
