@@ -7,37 +7,25 @@ let elements = {};
 
 /* ── State ── */
 const state = {
-    records: [],
-    filteredRecords: [],
     selectedRows: [],
     wasmReady: false,
     computeCuttingPlan: null,
 };
-
-const DATA_URL = "./data/cutting_components.json";
 
 // Boot logic
 async function boot() {
     // 1. Initialize elements (only after DOM is ready)
     elements = {
         datasetStatus: document.getElementById("datasetStatus"),
-        orderNameMaterialSelect: document.getElementById("orderNameMaterialSelect"),
-        lengthOfBoxCm: document.getElementById("lengthOfBoxCm"),
-        widthOfBoxCm: document.getElementById("widthOfBoxCm"),
+        projectName: document.getElementById("projectName"),
         materialLengthCm: document.getElementById("materialLengthCm"),
         bundleSize: document.getElementById("bundleSize"),
-        lengthSelect: document.getElementById("lengthSelect"),
         customLengthInput: document.getElementById("customLengthInput"),
-        customModeCheckbox: document.getElementById("customModeCheckbox"),
         addRowQtyInput: document.getElementById("addRowQtyInput"),
-        addComponentButton: document.getElementById("addComponentButton"),
         selectedListBody: document.getElementById("selectedListBody"),
         calculateButton: document.getElementById("calculateButton"),
         resultList: document.getElementById("resultList"),
         resultsSection: document.getElementById("resultsSection"),
-        helpButton: document.getElementById("helpButton"),
-        helpModal: document.getElementById("helpModal"),
-        closeModalButton: document.getElementById("closeModalButton"),
         selectedRowTemplate: document.getElementById("selectedRowTemplate"),
         resultCardTemplate: document.getElementById("resultCardTemplate"),
     };
@@ -61,11 +49,9 @@ if (document.readyState === "loading") {
 /* ── Bootstrap ── */
 async function init() {
     bindEvents();
-    await loadData();
     await loadWasm();
     setStatus("ready", "Sẵn sàng");
-    refreshSelectors();
-    populateAllMatchingComponents();
+    state.selectedRows = [];
     renderResults([]);
 }
 
@@ -77,34 +63,33 @@ async function loadWasm() {
 
 /* ── Events ── */
 function bindEvents() {
-    elements.orderNameMaterialSelect.addEventListener("change", () => {
-        refreshSelectors();
-        populateAllMatchingComponents();
-        renderResults([]);
+    // Keyboard: Enter on length moves focus to qty (or adds if both present)
+    elements.customLengthInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            const len = numberValue(elements.customLengthInput);
+            const qty = numberValue(elements.addRowQtyInput);
+            if (len != null && len > 0 && qty != null && qty > 0) {
+                e.preventDefault();
+                addSelectedLength();
+            } else {
+                e.preventDefault();
+                elements.addRowQtyInput.focus();
+            }
+        }
     });
 
-    // Material selects
-    [elements.lengthOfBoxCm, elements.widthOfBoxCm].forEach((el) => {
-        el.addEventListener("change", () => {
-            refreshSelectors();
-            populateAllMatchingComponents();
-            renderResults([]);
-        });
-    });
-
-    elements.lengthSelect.addEventListener("change", () => {
-        syncAddRow();
-    });
-
-    elements.addComponentButton.addEventListener("click", () => {
-        addSelectedLength();
-    });
-
-    elements.customModeCheckbox.addEventListener("change", toggleCustomMode);
-    elements.customLengthInput.addEventListener("input", syncCustomAddRow);
-    elements.addRowQtyInput.addEventListener("input", () => {
-        if (elements.customModeCheckbox.checked) {
-            syncCustomAddRow();
+    // Keyboard: Enter on qty adds the item if both present (or switches to length if length is empty)
+    elements.addRowQtyInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            const len = numberValue(elements.customLengthInput);
+            const qty = numberValue(elements.addRowQtyInput);
+            if (len != null && len > 0 && qty != null && qty > 0) {
+                e.preventDefault();
+                addSelectedLength();
+            } else if (len == null) {
+                e.preventDefault();
+                elements.customLengthInput.focus();
+            }
         }
     });
 
@@ -114,29 +99,6 @@ function bindEvents() {
     // Stock-length input
     elements.materialLengthCm.addEventListener("input", updateCalculateState);
     elements.bundleSize.addEventListener("input", updateCalculateState);
-
-    // Help Modal events
-    elements.helpButton.addEventListener("click", openHelpModal);
-    elements.closeModalButton.addEventListener("click", closeHelpModal);
-    elements.helpModal.addEventListener("click", (e) => {
-        if (e.target === elements.helpModal) closeHelpModal();
-    });
-    window.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && elements.helpModal.classList.contains("active")) {
-            closeHelpModal();
-        }
-    });
-}
-
-/* ── Data loading ── */
-async function loadData() {
-    const response = await fetch(DATA_URL);
-    if (!response.ok) throw new Error(`Unable to load ${DATA_URL}`);
-    state.records = await response.json();
-    if (!Array.isArray(state.records)) throw new Error("cutting_components.json must contain an array");
-
-    const orders = uniqueSorted(state.records.map(r => r.order_name));
-    setOptions(elements.orderNameMaterialSelect, [option("Chọn LSX…", ""), ...orders.map(v => option(v, v))]);
 }
 
 /* ── Status ── */
@@ -145,171 +107,20 @@ function setStatus(kind, text) {
     elements.datasetStatus.textContent = text;
 }
 
-/* ── Cascade selects ── */
-function refreshSelectors() {
-    const orderName = elements.orderNameMaterialSelect.value;
-    const length = numberValue(elements.lengthOfBoxCm);
-    const width = numberValue(elements.widthOfBoxCm);
-
-    if (!orderName) {
-        setOptions(elements.lengthOfBoxCm, [option("…", "")], true);
-        setOptions(elements.widthOfBoxCm, [option("…", "")], true);
-        state.filteredRecords = [];
-        updateMatchCount();
-        syncAddRowOptions();
-        return;
-    }
-
-    const orderRecords = state.records.filter(r => r.order_name === orderName);
-
-    // Length is filtered by order
-    const availableLengths = unique(orderRecords.map(r => Number(r.lengthOfBoxCm)));
-    setOptions(elements.lengthOfBoxCm, availableLengths.map(v => option(String(v), String(v))), false);
-
-    // Preserve selected length if still valid, otherwise default to first available
-    if (length != null && availableLengths.includes(length)) {
-        elements.lengthOfBoxCm.value = String(length);
-    } else if (availableLengths.length > 0) {
-        elements.lengthOfBoxCm.value = String(availableLengths[0]);
-    }
-
-    const newLength = numberValue(elements.lengthOfBoxCm);
-
-    // Width is filtered by order + length
-    if (newLength != null) {
-        const availableWidths = unique(
-            orderRecords.filter(r => Number(r.lengthOfBoxCm) === newLength).map(r => Number(r.widthOfBoxCm))
-        );
-        setOptions(elements.widthOfBoxCm, availableWidths.map(v => option(String(v), String(v))), false);
-
-        // Preserve selected width if still valid, otherwise default to first available
-        if (width != null && availableWidths.includes(width)) {
-            elements.widthOfBoxCm.value = String(width);
-        } else if (availableWidths.length > 0) {
-            elements.widthOfBoxCm.value = String(availableWidths[0]);
-        }
-    } else {
-        setOptions(elements.widthOfBoxCm, [option("…", "")], true);
-    }
-
-    // Recompute filtered records
-    const finalL = numberValue(elements.lengthOfBoxCm);
-    const finalW = numberValue(elements.widthOfBoxCm);
-
-    if (orderName && finalL != null && finalW != null) {
-        state.filteredRecords = orderRecords.filter(r =>
-            Number(r.lengthOfBoxCm) === finalL && Number(r.widthOfBoxCm) === finalW
-        );
-    } else {
-        state.filteredRecords = [];
-    }
-
-    updateMatchCount();
-    syncAddRowOptions();
-}
-
-function updateMatchCount() {
-    // Match count element removed
-}
-
-function syncAddRowOptions() {
-    if (state.filteredRecords.length === 0) {
-        setOptions(elements.lengthSelect, [option("Chiều dài…", "")], true);
-        if (!elements.customModeCheckbox.checked) {
-            elements.addRowQtyInput.value = "";
-            elements.addRowQtyInput.disabled = true;
-            elements.addComponentButton.disabled = true;
-        }
-        return;
-    }
-
-    const lengths = unique(state.filteredRecords.map(r => Number(r.lengthOfDetailCm)));
-    setOptions(elements.lengthSelect, [option("Chiều dài…", ""), ...lengths.map(v => option(String(v), String(v)))], false);
-
-    // Auto-select if only 1
-    if (lengths.length === 1) {
-        elements.lengthSelect.value = String(lengths[0]);
-    } else {
-        elements.lengthSelect.value = "";
-    }
-
-    if (!elements.customModeCheckbox.checked) {
-        syncAddRow();
-    }
-}
-
-function syncAddRow() {
-    if (elements.customModeCheckbox.checked) return;
-
-    const len = numberValue(elements.lengthSelect);
-    if (len == null) {
-        elements.addRowQtyInput.value = "";
-        elements.addRowQtyInput.disabled = true;
-        elements.addComponentButton.disabled = true;
-        return;
-    }
-
-    let sumQty = 0;
-    for (const r of state.filteredRecords) {
-        if (Number(r.lengthOfDetailCm) === len) {
-            sumQty += Number(r.qty_needed);
-        }
-    }
-
-    elements.addRowQtyInput.value = String(sumQty);
-    elements.addRowQtyInput.disabled = false;
-    elements.addComponentButton.disabled = false;
-}
-
-function resetPicker() {
-    elements.lengthSelect.value = "";
-    syncAddRow();
-}
-
-function toggleCustomMode() {
-    const isCustom = elements.customModeCheckbox.checked;
-    if (isCustom) {
-        elements.lengthSelect.style.display = "none";
-        elements.customLengthInput.style.display = "";
-        elements.customLengthInput.value = "";
-        elements.addRowQtyInput.value = "";
-        elements.addRowQtyInput.disabled = false;
-        elements.addComponentButton.disabled = true;
-        elements.customLengthInput.focus();
-    } else {
-        elements.lengthSelect.style.display = "";
-        elements.customLengthInput.style.display = "none";
-        syncAddRowOptions();
-    }
-}
-
-function syncCustomAddRow() {
-    const len = numberValue(elements.customLengthInput);
-    const qty = numberValue(elements.addRowQtyInput);
-    if (len != null && len > 0 && qty != null && qty > 0) {
-        elements.addComponentButton.disabled = false;
-    } else {
-        elements.addComponentButton.disabled = true;
-    }
-}
+// syncCustomAddRow removed in favor of Enter key auto-add flow
 
 function addSelectedLength() {
-    const isCustom = elements.customModeCheckbox.checked;
-    const len = isCustom ? numberValue(elements.customLengthInput) : numberValue(elements.lengthSelect);
+    const len = numberValue(elements.customLengthInput);
     const qty = numberValue(elements.addRowQtyInput);
     if (len == null || qty == null || qty < 1) return;
 
     const key = String(len);
     if (state.selectedRows.some(row => row.key === key)) {
         highlightRow(key);
-        if (isCustom) {
-            elements.customLengthInput.value = "";
-            elements.addRowQtyInput.value = "";
-            elements.addComponentButton.disabled = true;
-            elements.customLengthInput.focus();
-        } else {
-            resetPicker();
-        }
+        // clear inputs for custom flow
+        elements.customLengthInput.value = "";
+        elements.addRowQtyInput.value = "";
+        elements.customLengthInput.focus();
         return;
     }
 
@@ -324,14 +135,10 @@ function addSelectedLength() {
     renderSelectedRows();
     updateCalculateState();
 
-    if (isCustom) {
-        elements.customLengthInput.value = "";
-        elements.addRowQtyInput.value = "";
-        elements.addComponentButton.disabled = true;
-        elements.customLengthInput.focus();
-    } else {
-        resetPicker();
-    }
+    // clear inputs after add (custom-entry flow)
+    elements.customLengthInput.value = "";
+    elements.addRowQtyInput.value = "";
+    elements.customLengthInput.focus();
 }
 
 function highlightRow(key) {
@@ -366,6 +173,21 @@ function renderSelectedRows() {
         qtyInput.addEventListener("input", (e) => {
             row.qty_needed = Math.max(1, Math.trunc(Number(e.target.value) || 1));
             updateCalculateState();
+        });
+        qtyInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                // Find the next row's qty input
+                const trElement = qtyInput.closest("tr");
+                const nextTr = trElement.nextElementSibling;
+                if (nextTr) {
+                    const nextInput = nextTr.querySelector(".qty-input");
+                    if (nextInput) nextInput.focus();
+                } else {
+                    // Last row: focus the add-row length input
+                    elements.customLengthInput.focus();
+                }
+            }
         });
 
         fragment.querySelector(".remove-btn").addEventListener("click", () => {
@@ -422,7 +244,21 @@ async function calculate() {
 /* ── Render results ── */
 function renderResults(result, stockLength = 0) {
     if (!result || !Array.isArray(result.patterns) || result.patterns.length === 0) {
-        elements.resultList.innerHTML = '<p class="meta-line">Chưa có kết quả.</p>';
+        elements.resultList.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="9" y1="3" x2="9" y2="21"></line>
+                        <line x1="15" y1="3" x2="15" y2="21"></line>
+                        <line x1="3" y1="9" x2="21" y2="9"></line>
+                        <line x1="3" y1="15" x2="21" y2="15"></line>
+                    </svg>
+                </div>
+                <h4>Kế hoạch cắt phôi tối ưu</h4>
+                <p>Nhập thông tin chiều dài phôi và các chi tiết ở cột bên trái, sau đó nhấn <strong>"Tính Toán"</strong> để xem sơ đồ tối ưu hóa.</p>
+            </div>
+        `;
         return;
     }
 
@@ -493,61 +329,15 @@ function renderResults(result, stockLength = 0) {
     elements.resultList.appendChild(fragment);
 }
 
-function populateAllMatchingComponents() {
-    const grouped = {};
-    for (const record of state.filteredRecords) {
-        const len = Number(record.lengthOfDetailCm);
-        const qty = Number(record.qty_needed);
-        grouped[len] = (grouped[len] || 0) + qty;
-    }
-
-    state.selectedRows = Object.keys(grouped).map(len => ({
-        key: String(len),
-        lengthOfDetailCm: Number(len),
-        qty_needed: grouped[len],
-    })).sort((a, b) => b.lengthOfDetailCm - a.lengthOfDetailCm);
-
-    renderSelectedRows();
-    updateCalculateState();
-}
-
 /* ── Utilities ── */
-
-function option(label, value) {
-    const el = document.createElement("option");
-    el.textContent = label;
-    el.value = value;
-    return el;
-}
-
-function setOptions(select, options, disabled = false) {
-    select.replaceChildren(...options);
-    select.disabled = disabled;
-}
 
 function numberValue(input) {
     const v = Number(input.value);
     return (input.value !== "" && Number.isFinite(v)) ? v : null;
 }
 
-function unique(values) {
-    return [...new Set(values.filter(Number.isFinite))].sort((a, b) => a - b);
-}
-
-function uniqueSorted(values) {
-    return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b, "en"));
-}
-
 /* ── Help Modal Handlers ── */
-function openHelpModal() {
-    elements.helpModal.classList.add("active");
-    document.body.style.overflow = "hidden"; // Prevent scrolling behind modal
-}
-
-function closeHelpModal() {
-    elements.helpModal.classList.remove("active");
-    document.body.style.overflow = ""; // Re-enable scrolling
-}
+// Help modal removed per request
 
 /* ── Export to Excel Handlers ── */
 function exportToExcel(result, stockLength) {
@@ -560,24 +350,29 @@ function exportToExcel(result, stockLength) {
 
     // Summary metadata
     rows.push(["TIÊU ĐỀ", "KẾ HOẠCH CẮT PHÔI TỐI ƯU"]);
+    // Insert project name if provided
+    const project = elements.projectName && elements.projectName.value ? elements.projectName.value.trim() : "";
+    if (project) {
+        rows.push(["LỆNH SẢN XUẤT", project]);
+    }
     rows.push([]);
     rows.push(["TỔNG HỢP"]);
-    
+
     let totalBars = 0;
     let totalWaste = 0;
     for (const p of result.patterns) {
         totalBars += p.qty;
         totalWaste += (p.qty * p.waste);
     }
-    
+
     rows.push(["Tổng số phôi sử dụng", totalBars, "cây phôi"]);
     rows.push(["Tổng lượng dư thừa (hao hụt)", totalWaste, "mm"]);
     rows.push(["Tỷ lệ dư thừa", Number(result.percentage_wasted.toFixed(2)), "%"]);
     rows.push([]);
-    
+
     // Details header
     rows.push(["CHI TIẾT KẾ HOẠCH CẮT"]);
-    
+
     const detailHeaders = [
         "Mẫu cắt"
     ];
@@ -591,26 +386,99 @@ function exportToExcel(result, stockLength) {
     let patternIndex = 1;
     for (const pattern of result.patterns) {
         const patternName = `Mẫu cắt ${patternIndex++}${pattern.is_secondary ? ' (cắt cơ)' : ''}`;
-        
+
         const rowData = [
             patternName
         ];
-        
+
         result.lengths.forEach((len, idx) => {
             const count = pattern.counts[idx];
             rowData.push(count || 0);
         });
-        
+
         rowData.push(pattern.waste, stockLength, pattern.qty);
         rows.push(rowData);
     }
 
     // Create Sheet
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    
+
     // Create Workbook
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "KeHoachCat");
+    const thinBorder = {
+        top: { style: "thin", color: { rgb: "000000" } },
+        bottom: { style: "thin", color: { rgb: "000000" } },
+        left: { style: "thin", color: { rgb: "000000" } },
+        right: { style: "thin", color: { rgb: "000000" } }
+    };
+
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = range.s.r; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+            const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+            const cell = ws[cellAddress];
+            if (!cell) continue;
+
+            cell.s = cell.s || {};
+
+            const val = String(cell.v || "").trim();
+
+            // 1. Identify and bold headers
+            const isSectionHeader = ["TỔNG HỢP", "CHI TIẾT KẾ HOẠCH CẮT"].includes(val);
+            const isTitleLabel = (C === 0 && ["TIÊU ĐỀ", "LỆNH SẢN XUẤT", "LSX", "DỰ ÁN"].includes(val));
+
+            let isDetailsHeader = false;
+            if (R > 0) {
+                const firstCellInRow = ws[XLSX.utils.encode_cell({ r: R, c: 0 })];
+                if (firstCellInRow && String(firstCellInRow.v || "").trim() === "Mẫu cắt") {
+                    isDetailsHeader = true;
+                }
+            }
+
+            if (isSectionHeader || isTitleLabel || isDetailsHeader) {
+                cell.s.font = { bold: true };
+            }
+
+            // 2. Identify tables and apply borders
+            let inSummaryTable = false;
+            let summaryHeaderRow = -1;
+            for (let r = 0; r <= range.e.r; ++r) {
+                const c = ws[XLSX.utils.encode_cell({ r: r, c: 0 })];
+                if (c && String(c.v || "").trim() === "TỔNG HỢP") {
+                    summaryHeaderRow = r;
+                    break;
+                }
+            }
+            if (summaryHeaderRow !== -1 && R > summaryHeaderRow && R <= summaryHeaderRow + 3) {
+                inSummaryTable = true;
+            }
+
+            let inDetailsTable = false;
+            let detailsHeaderRow = -1;
+            for (let r = 0; r <= range.e.r; ++r) {
+                const c = ws[XLSX.utils.encode_cell({ r: r, c: 0 })];
+                if (c && String(c.v || "").trim() === "Mẫu cắt") {
+                    detailsHeaderRow = r;
+                    break;
+                }
+            }
+            if (detailsHeaderRow !== -1 && R >= detailsHeaderRow && R <= range.e.r) {
+                inDetailsTable = true;
+            }
+
+            if (inSummaryTable || inDetailsTable) {
+                cell.s.border = thinBorder;
+
+                // Alignment inside tables
+                if (C === 0) {
+                    cell.s.alignment = { horizontal: "left", vertical: "center" };
+                } else {
+                    cell.s.alignment = { horizontal: "center", vertical: "center" };
+                }
+            }
+        }
+    }
 
     // Format column widths for readability dynamically
     const colWidths = [
@@ -627,6 +495,6 @@ function exportToExcel(result, stockLength) {
     ws["!cols"] = colWidths;
 
     // Trigger download
-    const fileName = `KeHoachCat_${new Date().toISOString().slice(0,10)}.xlsx`;
+    const fileName = `KeHoachCat_${new Date().toISOString().slice(0, 10)}.xlsx`;
     XLSX.writeFile(wb, fileName);
 }
