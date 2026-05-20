@@ -219,6 +219,44 @@
         };
     }
 
+    function normalize(v) {
+        return String(v ?? "")
+            .trim()
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "") // remove accents
+            .replace(/[:：]/g, "")
+            .replace(/\s+/g, " ");
+    }
+
+    function extractOrderName(workbook) {
+        const TARGET_SHEETS = ["lsx go", "lsx sat"];
+
+        // Expecting SheetJS workbook: SheetNames + Sheets
+        if (!workbook || !Array.isArray(workbook.SheetNames)) return null;
+
+        for (const sheetName of workbook.SheetNames) {
+            if (!TARGET_SHEETS.includes(normalize(sheetName))) continue;
+            const sheet = workbook.Sheets[sheetName];
+            if (!sheet) continue;
+
+            const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: null });
+            for (let r = 0; r < rows.length; r++) {
+                const row = rows[r] || [];
+                for (let c = 0; c < row.length; c++) {
+                    if (normalize(row[c]) === 'lsx so') {
+                        const next = row[c + 1];
+                        const orderName = next != null ? String(next).trim() : '';
+                        if (orderName) return orderName;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+
     function parseWorkbook(workbook, options = {}) {
         const allGrouped = new Map();
         const validation = [];
@@ -246,6 +284,15 @@
 
         const result = finalize(allGrouped);
 
+        // include extracted order name when available (supports SheetJS and ExcelJS workbooks)
+        try {
+            const orderName = extractOrderName(workbook);
+            if (orderName) result.order_name = orderName;
+            else result.order_name = null;
+        } catch (e) {
+            result.order_name = null;
+        }
+
         if (options.includeValidation) {
             result.validation = validation;
         }
@@ -270,8 +317,9 @@
     global.BomParser = {
         parseBomFile,
         parseWorkbook,
-        validateBomSheet
+        validateBomSheet,
+        extractOrderName
     };
 
-    global.parseBomFile = parseBomFile;
+    global.bom_parse = parseBomFile;
 })(typeof window !== 'undefined' ? window : globalThis);
