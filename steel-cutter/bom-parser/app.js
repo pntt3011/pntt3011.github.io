@@ -110,7 +110,6 @@ async function handleFile(file) {
         const parsed = await parser(file, { includeValidation: true });
         state.validation = Array.isArray(parsed.validation) ? parsed.validation : [];
         state.order_name = parsed?.order_name ?? null;
-        console.log("Parsed BOM data:", parsed);
         state.materials = sortMaterials(Array.isArray(parsed.steel_material) ? parsed.steel_material : []);
         state.plans = state.materials.map((material) => computeMaterialPlan(material));
 
@@ -159,7 +158,7 @@ function computeMaterialPlan(material) {
     }
 
     // always use fixed stock length per user request
-    const STOCK_LENGTH = 6000;
+    const STOCK_LENGTH = 5950;
 
     const input = {
         lengths,
@@ -323,7 +322,7 @@ function exportExcel() {
     const summaryHeaderRow = summaryRows.length;
     summaryRows.push(["TỔNG HỢP"]);
     summaryRows.push(["Số loại vật liệu", state.plans.length]);
-    summaryRows.push(["Chiều dài phôi gốc", 6000, "mm"]);
+    summaryRows.push(["Chiều dài phôi gốc", 5950, "mm"]);
 
     let totalBars = 0;
     let totalWaste = 0;
