@@ -12,6 +12,10 @@ const state = {
     students: [],
     tasks: [],
     completions: new Map(),
+    completionRange: {
+        startDate: null,
+        endDate: null,
+    },
     student: null,
     accessMode: "editable",
     selectedDate: null,
@@ -184,6 +188,10 @@ async function loadStudentWorkspace(student, options = {}) {
     state.student = student;
     state.accessMode = options.accessMode || "editable";
     state.completions = new Map();
+    state.completionRange = {
+        startDate: null,
+        endDate: null,
+    };
     state.pendingTaskIds.clear();
 
     const { data, error } = await state.supabase
@@ -194,17 +202,17 @@ async function loadStudentWorkspace(student, options = {}) {
     if (error) throw error;
 
     state.tasks = data || [];
-    await loadCompletions();
+    await loadCompletionsForDateRange(initialCompletionStartDate(), todayKey);
     renderStudentSelect(student.id);
     renderTaskWorkspace();
 }
 
-async function loadCompletions() {
+async function loadCompletionsForDateRange(startDateKey, endDateKey) {
     const taskIds = state.tasks.map((task) => task.id);
     if (!taskIds.length) return;
 
-    const startDate = formatDateKey(state.visibleStartDate);
-    const endDate = addDaysToKey(todayKey, 1);
+    const startDate = formatDateKey(parseDateKey(startDateKey));
+    const endDate = addDaysToKey(formatDateKey(parseDateKey(endDateKey)), 1);
     const { data, error } = await state.supabase
         .from("task_completions")
         .select("task_id, finished_at")
@@ -223,6 +231,9 @@ async function loadCompletions() {
         }
         state.completions.get(row.task_id).set(dateKey, row.finished_at);
     }
+
+    state.completionRange.startDate = startDate;
+    state.completionRange.endDate = endDateKey;
 }
 
 function renderDateRail() {
@@ -241,8 +252,11 @@ function renderDateRail() {
         const button = fragment.querySelector("button");
         button.classList.toggle("is-active", key === state.selectedDate);
         fragment.querySelector(".date-chip__day").textContent = formatLongDate(date);
-        button.addEventListener("click", () => {
+        button.addEventListener("click", async () => {
             state.selectedDate = key;
+            if (!isSelectedDateWithinCompletionCache(key)) {
+                await ensureCompletionsForSelectedDate(key);
+            }
             renderDateRail();
             renderTaskWorkspace();
         });
@@ -301,12 +315,13 @@ function renderTaskRow(task, selectedDayIsToday) {
     const badge = fragment.querySelector(".task-badge");
     const finishedAt = fragment.querySelector(".task-finished-at");
 
-    const completedAt = getCompletionTime(task.id, state.selectedDate);
+    const completedAt = getCompletionTime(task, state.selectedDate);
     const isCompleted = Boolean(completedAt);
     const isPending = state.pendingTaskIds.has(task.id);
     const isReadOnly = state.accessMode === "readonly";
-    // keep the checkbox enabled, but block old-day completion in the handler
-    const isCheckable = !isCompleted && !isPending && !isReadOnly;
+    // allow the checkbox to be clickable for read-only users so we can show a login prompt;
+    // still prevent interaction when the task is already completed or pending
+    const isCheckable = !isCompleted && !isPending;
 
     row.classList.toggle("is-complete", isCompleted);
     row.classList.toggle("is-pending", isPending);
@@ -324,12 +339,25 @@ function renderTaskRow(task, selectedDayIsToday) {
     } else {
         badge.textContent = (repeatMap[repeat] || capitalize(task.repeat_type)) + (task.time_type ? ` · ${formatTimeType(task.time_type)}` : '');
     }
-    finishedAt.textContent = completedAt ? `Hoàn thành lúc ${formatFinishedAt(completedAt)}` : "";
+    finishedAt.textContent = completedAt ? formatCompletionLabel(task, completedAt) : "";
 
     checkbox.checked = isCompleted;
     checkbox.disabled = !isCheckable;
     checkbox.addEventListener("change", async (event) => {
-        if (!event.target.checked || isCompleted || isReadOnly) {
+        // unchecking always reverts to the completion state
+        if (!event.target.checked) {
+            event.target.checked = isCompleted;
+            return;
+        }
+
+        // read-only users see a prompt to sign in when attempting to complete
+        if (isReadOnly) {
+            event.target.checked = isCompleted;
+            window.alert("Cần đăng nhập để hoàn thành công việc");
+            return;
+        }
+
+        if (isCompleted || isPending) {
             event.target.checked = isCompleted;
             return;
         }
@@ -349,28 +377,97 @@ function renderTaskRow(task, selectedDayIsToday) {
 async function completeTask(task) {
     if (!state.student || task.student_id !== state.student.id || !state.supabase) return;
 
-    state.pendingTaskIds.add(task.id);
+    const completedAt = new Date().toISOString();
+    const previousCompletions = cloneCompletions(state.completions);
+
+    applyOptimisticCompletion(task.id, todayKey, completedAt);
     renderTaskWorkspace();
 
     // use the current timestamp for finished_at because checking is only allowed for today
     const now = new Date();
     const finishedAtIso = now.toISOString();
     const { error } = await state.supabase.from("task_completions").insert({ task_id: task.id, finished_at: finishedAtIso });
-    state.pendingTaskIds.delete(task.id);
 
     if (error) {
         console.error(error);
-        await loadCompletions();
+        state.completions = previousCompletions;
         renderTaskWorkspace();
         return;
     }
 
-    await loadCompletions();
+    try {
+        await loadCompletionsForDateRange(state.completionRange.startDate || initialCompletionStartDate(), state.completionRange.endDate || todayKey);
+    } catch (loadError) {
+        console.error(loadError);
+        state.completions = previousCompletions;
+    }
+
     renderTaskWorkspace();
 }
 
-function getCompletionTime(taskId, dateKey) {
-    return state.completions.get(taskId)?.get(dateKey) || null;
+function applyOptimisticCompletion(taskId, dateKey, finishedAtIso) {
+    const taskCompletions = state.completions.get(taskId) || new Map();
+    taskCompletions.set(dateKey, finishedAtIso);
+    state.completions.set(taskId, taskCompletions);
+}
+
+function cloneCompletions(completions) {
+    const cloned = new Map();
+    for (const [taskId, taskCompletions] of completions.entries()) {
+        cloned.set(taskId, new Map(taskCompletions));
+    }
+    return cloned;
+}
+
+function getCompletionTime(task, dateKey) {
+    const taskCompletions = state.completions.get(task.id);
+    if (!taskCompletions) return null;
+
+    const repeatType = String(task.repeat_type || "").toLowerCase();
+    if (repeatType === "weekly") {
+        return getPeriodCompletionTime(taskCompletions, getWeekDateKeys(dateKey));
+    }
+
+    if (repeatType === "monthly") {
+        return getPeriodCompletionTime(taskCompletions, getMonthDateKeys(dateKey));
+    }
+
+    return taskCompletions.get(dateKey) || null;
+}
+
+function getPeriodCompletionTime(taskCompletions, dateKeys) {
+    for (const key of dateKeys) {
+        const completedAt = taskCompletions.get(key);
+        if (completedAt) return completedAt;
+    }
+    return null;
+}
+
+function getWeekDateKeys(dateKey) {
+    const selectedDate = parseDateKey(dateKey);
+    const start = startOfWeekLocal(selectedDate);
+    const keys = [];
+
+    for (let offset = 0; offset < 7; offset += 1) {
+        const current = new Date(start);
+        current.setDate(start.getDate() + offset);
+        keys.push(formatDateKey(current));
+    }
+
+    return keys;
+}
+
+function getMonthDateKeys(dateKey) {
+    const selectedDate = parseDateKey(dateKey);
+    const keys = [];
+    const start = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+    const end = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
+
+    for (const current of buildDateRange(start, end)) {
+        keys.push(formatDateKey(current));
+    }
+
+    return keys;
 }
 
 function compareTasks(left, right) {
@@ -420,6 +517,14 @@ function startOfLocalDay(date) {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
+function startOfWeekLocal(date) {
+    const normalized = startOfLocalDay(date);
+    const day = normalized.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    normalized.setDate(normalized.getDate() + diff);
+    return normalized;
+}
+
 function parseDateKey(key) {
     const [year, month, day] = key.split("-").map(Number);
     return new Date(year, month - 1, day);
@@ -457,6 +562,18 @@ function formatFinishedAt(value) {
     }).format(new Date(value));
 }
 
+function formatCompletionLabel(task, completedAt) {
+    const repeatType = String(task.repeat_type || "").toLowerCase();
+    const finishedDate = new Date(completedAt);
+    const time = formatFinishedAt(completedAt);
+
+    if (repeatType === "weekly" || repeatType === "monthly") {
+        return `Hoàn thành lúc ${formatLongDate(finishedDate)}, ${time}`;
+    }
+
+    return `Hoàn thành lúc ${time}`;
+}
+
 function formatTimeType(value) {
     return value.split("_").map(capitalize).join(" ");
 }
@@ -488,4 +605,40 @@ function escapeHtml(value) {
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
+}
+
+function isSelectedDateWithinCompletionCache(dateKey) {
+    const { startDate, endDate } = state.completionRange;
+    if (!startDate || !endDate) return false;
+
+    // Determine the month window the user needs: the whole month containing dateKey,
+    // but include from the start-of-week of the month's 1st day.
+    const d = parseDateKey(dateKey);
+    const firstOfMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+    const monthWeekStart = startOfWeekLocal(firstOfMonth);
+    const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    const monthWeekStartKey = formatDateKey(monthWeekStart);
+    const monthEndKey = formatDateKey(monthEnd);
+
+    return monthWeekStartKey >= startDate && monthEndKey <= endDate;
+}
+
+async function ensureCompletionsForSelectedDate(dateKey) {
+    if (isSelectedDateWithinCompletionCache(dateKey)) return;
+
+    const range = getCompletionRangeForDate(dateKey);
+    await loadCompletionsForDateRange(range.startDate, range.endDate);
+}
+
+function getCompletionRangeForDate(dateKey) {
+    const selectedDate = parseDateKey(dateKey);
+    const firstOfMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+    const monthWeekStart = startOfWeekLocal(firstOfMonth);
+    const monthEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
+    return { startDate: formatDateKey(monthWeekStart), endDate: formatDateKey(monthEnd) };
+}
+
+function initialCompletionStartDate() {
+    const today = parseDateKey(todayKey);
+    return formatDateKey(new Date(today.getFullYear(), today.getMonth() - 1, 1));
 }
