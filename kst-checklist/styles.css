@@ -135,7 +135,27 @@ h3 {
 }
 
 h1 {
-    font-size: 1.8rem;
+    font-size: 1.35rem;
+}
+
+.brand-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.brand-title__logo {
+    flex: 0 0 auto;
+    width: 48px;
+    height: 48px;
+    object-fit: contain;
+}
+
+.brand-title span {
+    white-space: nowrap;
 }
 
 h2 {
@@ -241,6 +261,26 @@ h2 {
     padding-right: 4px;
 }
 
+.card--dates .dates-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.card--dates .dates-filters {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.card--dates .dates-filters .select-control {
+    width: auto;
+    min-width: 64px;
+    padding: 6px 10px;
+    font-size: 0.92rem;
+}
+
 .date-chip {
     width: 100%;
     display: flex;
@@ -277,12 +317,6 @@ h2 {
 
 .date-chip__day {
     font-weight: 700;
-}
-
-.date-chip__meta {
-    font-size: 0.88rem;
-    color: var(--muted);
-    text-align: right;
 }
 
 .workspace-meta {

@@ -3,7 +3,7 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 const config = window.SUPABASE_CONFIG || {};
 const SUPABASE_URL = config.url || "";
 const SUPABASE_ANON_KEY = config.anonKey || "";
-const DEFAULT_START_DATE = config.startDate || "2026-05-24";
+const DEFAULT_START_DATE = config.startDate || new Date().toISOString().split("T")[0];
 
 const elements = {};
 
@@ -14,7 +14,6 @@ const state = {
     completions: new Map(),
     student: null,
     accessMode: "editable",
-    accessMessage: "",
     selectedDate: null,
     visibleStartDate: null,
     dateKeys: [],
@@ -36,20 +35,41 @@ async function boot() {
     bindEvents();
     state.visibleStartDate = normalizeStartDate(DEFAULT_START_DATE);
     state.dateKeys = buildDateRange(state.visibleStartDate, startOfLocalDay(new Date())).map(formatDateKey);
+    // set initial selected date and default filters (month/year of the latest date)
     state.selectedDate = state.dateKeys[state.dateKeys.length - 1] || todayKey;
+    const last = parseDateKey(state.selectedDate || todayKey);
+    state.filterMonth = last.getMonth() + 1;
+    state.filterYear = last.getFullYear();
+    populateMonthYearSelectors();
     renderDateRail();
     await initialize();
 }
 
+function populateMonthYearSelectors() {
+    if (!elements.monthSelect || !elements.yearSelect) return;
+    const months = new Set();
+    const years = new Set();
+    for (const key of state.dateKeys) {
+        const d = parseDateKey(key);
+        months.add(d.getMonth() + 1);
+        years.add(d.getFullYear());
+    }
+    const monthArr = Array.from(months).sort((a, b) => a - b);
+    const yearArr = Array.from(years).sort((a, b) => a - b);
+
+    elements.monthSelect.innerHTML = monthArr
+        .map((m) => `<option value="${m}" ${m === state.filterMonth ? 'selected' : ''}>${String(m).padStart(2, '0')}</option>`)
+        .join("");
+    elements.yearSelect.innerHTML = yearArr
+        .map((y) => `<option value="${y}" ${y === state.filterYear ? 'selected' : ''}>${y}</option>`)
+        .join("");
+}
+
 function cacheElements() {
-    elements.connectionStatus = document.getElementById("connectionStatus");
-    elements.rangeStatus = document.getElementById("rangeStatus");
-    elements.accessHint = document.getElementById("accessHint");
     elements.studentSelect = document.getElementById("studentSelect");
     elements.dateList = document.getElementById("dateList");
-    elements.workspaceTitle = document.getElementById("workspaceTitle");
-    elements.workspaceSubtitle = document.getElementById("workspaceSubtitle");
-    elements.taskScopePill = document.getElementById("taskScopePill");
+    elements.monthSelect = document.getElementById("monthSelect");
+    elements.yearSelect = document.getElementById("yearSelect");
     elements.datePill = document.getElementById("datePill");
     elements.taskList = document.getElementById("taskList");
     elements.dateButtonTemplate = document.getElementById("dateButtonTemplate");
@@ -62,17 +82,28 @@ function bindEvents() {
         if (!studentId) return;
         setTokenAndReload(studentId);
     });
+
+    if (elements.monthSelect) {
+        elements.monthSelect.addEventListener("change", (e) => {
+            state.filterMonth = e.target.value ? Number(e.target.value) : null;
+            renderDateRail();
+        });
+    }
+
+    if (elements.yearSelect) {
+        elements.yearSelect.addEventListener("change", (e) => {
+            state.filterYear = e.target.value ? Number(e.target.value) : null;
+            renderDateRail();
+        });
+    }
 }
 
 async function initialize() {
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-        setBanner("danger", "Setup needed");
-        elements.accessHint.textContent = "Fill in the Supabase public key in window.SUPABASE_CONFIG, then reload.";
         elements.taskList.innerHTML = emptyStateMarkup(
             "Configuration required",
             "The page is ready, but the public Supabase key is blank."
         );
-        elements.rangeStatus.textContent = `${state.dateKeys.length} day${state.dateKeys.length === 1 ? "" : "s"}`;
         renderDateRail();
         renderStudentSelect();
         renderTaskWorkspace();
@@ -80,14 +111,11 @@ async function initialize() {
     }
 
     state.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    elements.rangeStatus.textContent = `${state.dateKeys.length} day${state.dateKeys.length === 1 ? "" : "s"}`;
 
     try {
         await loadStudents();
     } catch (error) {
         console.error(error);
-        setBanner("danger", "Load failed");
-        elements.accessHint.textContent = error.message;
         elements.taskList.innerHTML = emptyStateMarkup(
             "Unable to load data",
             "Check the Supabase URL, public key, and table permissions."
@@ -96,8 +124,6 @@ async function initialize() {
 }
 
 async function loadStudents() {
-    setBanner("muted", "Loading students");
-
     const { data, error } = await state.supabase
         .from("students")
         .select("id, name")
@@ -109,8 +135,6 @@ async function loadStudents() {
     renderStudentSelect();
 
     if (!state.students.length) {
-        setBanner("warning", "No students");
-        elements.accessHint.textContent = "The students table is empty.";
         elements.taskList.innerHTML = emptyStateMarkup(
             "No student records",
             "Add at least one row to the students table."
@@ -123,7 +147,6 @@ async function loadStudents() {
         const previewStudent = state.students[0];
         await loadStudentWorkspace(previewStudent, {
             accessMode: "readonly",
-            accessMessage: "No token provided. Showing a read-only preview. Select a student to open editable access.",
         });
         return;
     }
@@ -133,26 +156,20 @@ async function loadStudents() {
         const previewStudent = state.students[0];
         await loadStudentWorkspace(previewStudent, {
             accessMode: "readonly",
-            accessMessage: "Invalid token. Showing a read-only preview. Select a student to open editable access.",
         });
         return;
     }
 
     await loadStudentWorkspace(student, {
         accessMode: "editable",
-        accessMessage: `Open this student with ?token=${student.id}. Completed items are locked and cannot be undone.`,
     });
 }
 
 function renderStudentSelect(selectedId = getTokenFromUrl()) {
-    const token = getTokenFromUrl();
-    const options = [
-        `<option value="">Select a student token</option>`,
-        ...state.students.map((student) => {
-            const selected = student.id === selectedId ? "selected" : "";
-            return `<option value="${escapeHtml(student.id)}" ${selected}>${escapeHtml(student.name)}</option>`;
-        }),
-    ];
+    const options = state.students.map((student) => {
+        const selected = student.id === selectedId ? "selected" : "";
+        return `<option value="${escapeHtml(student.id)}" ${selected}>${escapeHtml(student.name)}</option>`;
+    });
 
     elements.studentSelect.innerHTML = options.join("");
 }
@@ -160,16 +177,10 @@ function renderStudentSelect(selectedId = getTokenFromUrl()) {
 async function loadStudentWorkspace(student, options = {}) {
     state.student = student;
     state.accessMode = options.accessMode || "editable";
-    state.accessMessage = options.accessMessage || "";
     state.completions = new Map();
     state.pendingTaskIds.clear();
-
-    setBanner(state.accessMode === "readonly" ? "warning" : "accent", state.accessMode === "readonly" ? "Read-only preview" : `Token: ${student.id}`);
-    elements.accessHint.textContent = state.accessMessage || `Open this student with ?token=${student.id}. Completed items are locked and cannot be undone.`;
-    elements.workspaceTitle.textContent = student.name;
-    elements.workspaceSubtitle.textContent = state.accessMode === "readonly"
-        ? `Viewing a read-only preview for ${student.name}.`
-        : `Viewing tasks for ${student.name}.`;
+    const eyebrow = document.getElementById("eyebrowStudent");
+    if (eyebrow) eyebrow.textContent = student.name;
 
     const { data, error } = await state.supabase
         .from("tasks")
@@ -212,13 +223,20 @@ async function loadCompletions() {
 
 function renderDateRail() {
     elements.dateList.innerHTML = "";
-    for (const key of state.dateKeys) {
+    const keys = state.dateKeys.filter((key) => {
+        if (!state.filterMonth && !state.filterYear) return true;
+        const d = parseDateKey(key);
+        if (state.filterMonth && d.getMonth() + 1 !== state.filterMonth) return false;
+        if (state.filterYear && d.getFullYear() !== state.filterYear) return false;
+        return true;
+    });
+
+    for (const key of keys) {
         const date = parseDateKey(key);
         const fragment = elements.dateButtonTemplate.content.cloneNode(true);
         const button = fragment.querySelector("button");
         button.classList.toggle("is-active", key === state.selectedDate);
         fragment.querySelector(".date-chip__day").textContent = formatLongDate(date);
-        fragment.querySelector(".date-chip__meta").textContent = formatDateChipMeta(date, key);
         button.addEventListener("click", () => {
             state.selectedDate = key;
             renderDateRail();
@@ -227,10 +245,10 @@ function renderDateRail() {
         elements.dateList.appendChild(fragment);
     }
 
-    if (!state.dateKeys.length) {
+    if (!keys.length) {
         elements.dateList.innerHTML = emptyStateMarkup(
             "No dates yet",
-            "The configured start date is after today, so the list is empty for now."
+            "No dates match the selected month/year."
         );
     }
 }
@@ -239,7 +257,6 @@ function renderTaskWorkspace() {
     elements.datePill.textContent = prettyDateKey(state.selectedDate);
 
     if (!state.student) {
-        elements.taskScopePill.textContent = "No student selected";
         elements.taskList.innerHTML = emptyStateMarkup(
             "Pick a token",
             "Choose a student from the dropdown or add ?token=<student-id> to the URL."
@@ -249,7 +266,7 @@ function renderTaskWorkspace() {
 
     const tasks = getDisplayTasks();
     const activeCount = tasks.filter((task) => task.is_active).length;
-    elements.taskScopePill.textContent = activeCount > 0 ? `${activeCount} active task${activeCount === 1 ? "" : "s"}` : `${tasks.length} task${tasks.length === 1 ? "" : "s"}`;
+    // taskScopePill removed; no status pill shown here
 
     if (!tasks.length) {
         elements.taskList.innerHTML = emptyStateMarkup(
@@ -265,9 +282,7 @@ function renderTaskWorkspace() {
         elements.taskList.appendChild(renderTaskRow(task, selectedDayIsToday));
     }
 
-    elements.workspaceSubtitle.textContent = activeCount > 0
-        ? `Showing ${activeCount} active task${activeCount === 1 ? "" : "s"} for ${state.student.name}.`
-        : `Showing all tasks for ${state.student.name}.`;
+    // subtitle removed — no UI update required here
 }
 
 function getDisplayTasks() {
@@ -324,15 +339,12 @@ async function completeTask(task) {
 
     if (error) {
         console.error(error);
-        setBanner("danger", "Save failed");
-        elements.accessHint.textContent = `Could not save completion for ${task.name}.`;
         await loadCompletions();
         renderTaskWorkspace();
         return;
     }
 
     await loadCompletions();
-    setBanner("success", "Completion saved");
     renderTaskWorkspace();
 }
 
@@ -349,11 +361,6 @@ function compareTasks(left, right) {
 
 function getTaskSortKey(task) {
     return taskOrder[task.repeat_type]?.[task.time_type] ?? 99;
-}
-
-function setBanner(kind, text) {
-    elements.connectionStatus.className = `status-pill status-pill--${kind}`;
-    elements.connectionStatus.textContent = text;
 }
 
 function getTokenFromUrl() {
@@ -412,19 +419,10 @@ function prettyDateKey(key) {
 }
 
 function formatLongDate(date) {
-    return new Intl.DateTimeFormat("en-GB", {
-        weekday: "short",
-        day: "2-digit",
-        month: "short",
-    }).format(date);
-}
-
-function formatDateChipMeta(date, key) {
-    if (key === todayKey) return "Today";
-    const diff = Math.round((startOfLocalDay(new Date()) - startOfLocalDay(date)) / 86400000);
-    if (diff === 1) return "Yesterday";
-    if (diff > 1) return `${diff}d ago`;
-    return "Future";
+    const day = String(date.getDate()).padStart(2, "0");
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
 }
 
 function formatFinishedAt(value) {

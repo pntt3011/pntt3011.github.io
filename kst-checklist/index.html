@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Kingston Checklist</title>
+    <title>Checklist</title>
     <meta name="description" content="Student task checklist powered by Supabase." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -16,7 +16,7 @@
         window.SUPABASE_CONFIG = {
             url: "https://aquyeqwzbuxmufdlaufi.supabase.co",
             anonKey: "sb_publishable_3jFQpcGGkSZTneGtAKoWcQ_tYb5GhdF",
-            startDate: "2026-05-24",
+            startDate: "2026-05-23",
         };
     </script>
 </head>
@@ -29,28 +29,25 @@
         <aside class="panel panel--sidebar">
             <section class="card">
                 <div class="card-head">
-                    <div>
-                        <p class="eyebrow">Student access</p>
-                        <h1>Kingston Checklist</h1>
-                    </div>
-                    <span id="connectionStatus" class="status-pill status-pill--muted">Loading…</span>
+                    <h1 class="brand-title">
+                        <img src="./logo.png" alt="Kingston logo" class="brand-title__logo" />
+                        <span>Checklist</span>
+                    </h1>
                 </div>
 
                 <label class="field-group">
-                    <span class="field-label">Student name</span>
-                    <select id="studentSelect" class="select-control" aria-label="Student name"></select>
+                    <span class="field-label">Name</span>
+                    <select id="studentSelect" class="select-control" aria-label="Name"></select>
                 </label>
-
-                <p id="accessHint" class="card-note"></p>
             </section>
 
             <section class="card card--dates">
-                <div class="card-head card-head--compact">
-                    <div>
-                        <p class="eyebrow">Day view</p>
-                        <h2>Dates</h2>
+                <div class="dates-head">
+                    <span class="field-label">Day</span>
+                    <div class="dates-filters">
+                        <select id="monthSelect" class="select-control" aria-label="Month"></select>
+                        <select id="yearSelect" class="select-control" aria-label="Year"></select>
                     </div>
-                    <span id="rangeStatus" class="status-pill status-pill--muted">Loading…</span>
                 </div>
 
                 <div id="dateList" class="date-list" aria-label="Available dates"></div>
@@ -61,18 +58,14 @@
             <section class="card card--workspace">
                 <div class="workspace-head">
                     <div>
-                        <p class="eyebrow">Checklist</p>
-                        <h2 id="workspaceTitle">Select a student</h2>
+                        <p class="eyebrow">Checklist <span id="eyebrowStudent"></span></p>
                     </div>
                     <div class="workspace-meta">
-                        <span id="taskScopePill" class="status-pill status-pill--muted">No data loaded</span>
                         <span id="datePill" class="status-pill status-pill--accent">Choose a date</span>
                     </div>
                 </div>
 
-                <p id="workspaceSubtitle" class="card-note card-note--tight">
-                    Use the token in the URL to open one student account, then pick a date from the left rail.
-                </p>
+
 
                 <div id="taskList" class="task-list" aria-live="polite"></div>
             </section>
@@ -82,7 +75,6 @@
     <template id="dateButtonTemplate">
         <button type="button" class="date-chip">
             <span class="date-chip__day"></span>
-            <span class="date-chip__meta"></span>
         </button>
     </template>
 
