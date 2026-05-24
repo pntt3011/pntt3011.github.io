@@ -79,7 +79,7 @@ function bindEvents() {
     elements.studentSelect.addEventListener("change", (event) => {
         const studentId = event.target.value;
         if (!studentId) return;
-        setTokenAndReload(studentId);
+        setViewAndReload(studentId);
     });
 
     if (elements.monthSelect) {
@@ -100,8 +100,8 @@ function bindEvents() {
 async function initialize() {
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
         elements.taskList.innerHTML = emptyStateMarkup(
-            "Configuration required",
-            "The page is ready, but the public Supabase key is blank."
+            "Cần cấu hình",
+            "Trang đã sẵn sàng, nhưng khóa Supabase công khai đang trống."
         );
         renderDateRail();
         renderStudentSelect();
@@ -116,8 +116,8 @@ async function initialize() {
     } catch (error) {
         console.error(error);
         elements.taskList.innerHTML = emptyStateMarkup(
-            "Unable to load data",
-            "Check the Supabase URL, public key, and table permissions."
+            "Không thể tải dữ liệu",
+            "Kiểm tra URL Supabase, khóa công khai và quyền truy cập bảng."
         );
     }
 }
@@ -135,22 +135,27 @@ async function loadStudents() {
 
     if (!state.students.length) {
         elements.taskList.innerHTML = emptyStateMarkup(
-            "No student records",
-            "Add at least one row to the students table."
+            "Không có bản ghi học viên",
+            "Thêm ít nhất một hàng vào bảng students."
         );
         return;
     }
 
     const token = getTokenFromUrl();
-    if (!token) {
-        const previewStudent = state.students[0];
-        await loadStudentWorkspace(previewStudent, {
-            accessMode: "readonly",
-        });
+    const view = getViewFromUrl();
+    if (token && !view) {
+        setViewAndReload(token);
         return;
     }
 
-    const student = state.students.find((item) => item.id === token) || null;
+    const viewedStudentId = view || token;
+    if (!viewedStudentId) {
+        const previewStudent = state.students[0];
+        setViewAndReload(previewStudent.id);
+        return;
+    }
+
+    const student = state.students.find((item) => item.id === viewedStudentId) || null;
     if (!student) {
         const previewStudent = state.students[0];
         await loadStudentWorkspace(previewStudent, {
@@ -159,12 +164,14 @@ async function loadStudents() {
         return;
     }
 
+    const accessMode = view && view === token ? "editable" : "readonly";
+
     await loadStudentWorkspace(student, {
-        accessMode: "editable",
+        accessMode,
     });
 }
 
-function renderStudentSelect(selectedId = getTokenFromUrl()) {
+function renderStudentSelect(selectedId = getViewFromUrl() || getTokenFromUrl()) {
     const options = state.students.map((student) => {
         const selected = student.id === selectedId ? "selected" : "";
         return `<option value="${escapeHtml(student.id)}" ${selected}>${escapeHtml(student.name)}</option>`;
@@ -244,8 +251,8 @@ function renderDateRail() {
 
     if (!keys.length) {
         elements.dateList.innerHTML = emptyStateMarkup(
-            "No dates yet",
-            "No dates match the selected month/year."
+            "Chưa có ngày nào",
+            "Không có ngày phù hợp với tháng/năm đã chọn."
         );
     }
 }
@@ -253,8 +260,8 @@ function renderDateRail() {
 function renderTaskWorkspace() {
     if (!state.student) {
         elements.taskList.innerHTML = emptyStateMarkup(
-            "Pick a token",
-            "Choose a student from the dropdown or add ?token=<student-id> to the URL."
+            "Chọn token",
+            "Chọn học viên từ danh sách hoặc thêm ?token=<student-id> vào URL."
         );
         return;
     }
@@ -265,8 +272,8 @@ function renderTaskWorkspace() {
 
     if (!tasks.length) {
         elements.taskList.innerHTML = emptyStateMarkup(
-            "No tasks available",
-            "This student does not have any linked tasks yet."
+            "Không có nhiệm vụ",
+            ""
         );
         return;
     }
@@ -298,7 +305,7 @@ function renderTaskRow(task, selectedDayIsToday) {
     const isCompleted = Boolean(completedAt);
     const isPending = state.pendingTaskIds.has(task.id);
     const isReadOnly = state.accessMode === "readonly";
-    // allow checking on any selected date (history or today), but not when already completed or pending
+    // keep the checkbox enabled, but block old-day completion in the handler
     const isCheckable = !isCompleted && !isPending && !isReadOnly;
 
     row.classList.toggle("is-complete", isCompleted);
@@ -307,20 +314,32 @@ function renderTaskRow(task, selectedDayIsToday) {
 
     title.textContent = task.name;
     const repeat = String(task.repeat_type || '').toLowerCase();
-    if (repeat === 'weekly' || repeat === 'monthly') {
-        badge.textContent = capitalize(task.repeat_type);
+    const repeatMap = { daily: 'Hàng ngày', weekly: 'Hàng tuần', monthly: 'Hàng tháng' };
+    const dailyTimeMap = { start_shift: 'Đầu ca', random_between: 'Giữa ca', end_shift: 'Cuối ca' };
+    if (repeat === 'daily') {
+        const tt = String(task.time_type || '').toLowerCase();
+        badge.textContent = dailyTimeMap[tt] || repeatMap.daily + (task.time_type ? ` · ${formatTimeType(task.time_type)}` : '');
+    } else if (repeat === 'weekly' || repeat === 'monthly') {
+        badge.textContent = repeatMap[repeat] || capitalize(task.repeat_type);
     } else {
-        badge.textContent = `${capitalize(task.repeat_type)} · ${formatTimeType(task.time_type)}`;
+        badge.textContent = (repeatMap[repeat] || capitalize(task.repeat_type)) + (task.time_type ? ` · ${formatTimeType(task.time_type)}` : '');
     }
-    finishedAt.textContent = completedAt ? `Finished at ${formatFinishedAt(completedAt)}` : "";
+    finishedAt.textContent = completedAt ? `Hoàn thành lúc ${formatFinishedAt(completedAt)}` : "";
 
     checkbox.checked = isCompleted;
     checkbox.disabled = !isCheckable;
     checkbox.addEventListener("change", async (event) => {
-        if (!event.target.checked || isCompleted || !selectedDayIsToday || isReadOnly) {
+        if (!event.target.checked || isCompleted || isReadOnly) {
             event.target.checked = isCompleted;
             return;
         }
+
+        if (!selectedDayIsToday) {
+            event.target.checked = false;
+            window.alert("Không thể hoàn thành công việc trong quá khứ");
+            return;
+        }
+
         await completeTask(task);
     });
 
@@ -333,8 +352,9 @@ async function completeTask(task) {
     state.pendingTaskIds.add(task.id);
     renderTaskWorkspace();
 
-    // set finished_at to the selected date (local midnight) so completion records align with the day viewed
-    const finishedAtIso = new Date(parseDateKey(state.selectedDate)).toISOString();
+    // use the current timestamp for finished_at because checking is only allowed for today
+    const now = new Date();
+    const finishedAtIso = now.toISOString();
     const { error } = await state.supabase.from("task_completions").insert({ task_id: task.id, finished_at: finishedAtIso });
     state.pendingTaskIds.delete(task.id);
 
@@ -368,9 +388,13 @@ function getTokenFromUrl() {
     return new URLSearchParams(window.location.search).get("token")?.trim() || "";
 }
 
-function setTokenAndReload(token) {
+function getViewFromUrl() {
+    return new URLSearchParams(window.location.search).get("view")?.trim() || "";
+}
+
+function setViewAndReload(view) {
     const params = new URLSearchParams(window.location.search);
-    params.set("token", token);
+    params.set("view", view);
     window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
     initialize();
 }

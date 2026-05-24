@@ -496,8 +496,10 @@ h2 {
         min-height: auto;
     }
 
+    /* Keep the date list scrollable on narrower screens, but reduce height for mobile
+       so the workspace remains usable. */
     .date-list {
-        max-height: none;
+        max-height: calc(40vh);
     }
 }
 
@@ -530,5 +532,9 @@ h2 {
 
     .date-chip {
         padding: 11px 12px;
+    }
+    /* Slightly limit the date list height on small phones */
+    .date-list {
+        max-height: calc(36vh);
     }
 }
