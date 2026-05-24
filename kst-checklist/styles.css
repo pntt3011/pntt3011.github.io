@@ -17,7 +17,7 @@
     --radius-xl: 28px;
     --radius-lg: 20px;
     --radius-md: 16px;
-    --sidebar-width: 320px;
+    --sidebar-width: 240px;
 }
 
 * {
@@ -332,6 +332,17 @@ h2 {
     gap: 12px;
 }
 
+/* Completed task styling */
+.task-row.is-complete .task-row__topline h3 {
+    text-decoration: line-through;
+    color: var(--muted);
+    opacity: 0.9;
+}
+
+.task-row.is-complete .task-row__meta {
+    color: var(--muted);
+}
+
 .task-row {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
@@ -413,10 +424,10 @@ h2 {
     flex: none;
     display: inline-flex;
     align-items: center;
-    min-height: 26px;
-    padding: 0 10px;
+    min-height: 22px;
+    padding: 0 8px;
     border-radius: 999px;
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     font-weight: 700;
     letter-spacing: 0.02em;
     color: var(--accent-strong);
@@ -431,9 +442,7 @@ h2 {
     color: var(--muted);
 }
 
-.task-time-label {
-    font-weight: 600;
-}
+/* task-time-label removed: using only finished-at now */
 
 .task-finished-at {
     color: var(--accent-strong);

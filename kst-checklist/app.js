@@ -34,9 +34,9 @@ async function boot() {
     cacheElements();
     bindEvents();
     state.visibleStartDate = normalizeStartDate(DEFAULT_START_DATE);
-    state.dateKeys = buildDateRange(state.visibleStartDate, startOfLocalDay(new Date())).map(formatDateKey);
-    // set initial selected date and default filters (month/year of the latest date)
-    state.selectedDate = state.dateKeys[state.dateKeys.length - 1] || todayKey;
+    state.dateKeys = buildDateRange(state.visibleStartDate, startOfLocalDay(new Date())).map(formatDateKey).reverse();
+    // set initial selected date and default filters (month/year of the newest date)
+    state.selectedDate = state.dateKeys[0] || todayKey;
     const last = parseDateKey(state.selectedDate || todayKey);
     state.filterMonth = last.getMonth() + 1;
     state.filterYear = last.getFullYear();
@@ -70,7 +70,6 @@ function cacheElements() {
     elements.dateList = document.getElementById("dateList");
     elements.monthSelect = document.getElementById("monthSelect");
     elements.yearSelect = document.getElementById("yearSelect");
-    elements.datePill = document.getElementById("datePill");
     elements.taskList = document.getElementById("taskList");
     elements.dateButtonTemplate = document.getElementById("dateButtonTemplate");
     elements.taskRowTemplate = document.getElementById("taskRowTemplate");
@@ -179,8 +178,6 @@ async function loadStudentWorkspace(student, options = {}) {
     state.accessMode = options.accessMode || "editable";
     state.completions = new Map();
     state.pendingTaskIds.clear();
-    const eyebrow = document.getElementById("eyebrowStudent");
-    if (eyebrow) eyebrow.textContent = student.name;
 
     const { data, error } = await state.supabase
         .from("tasks")
@@ -254,8 +251,6 @@ function renderDateRail() {
 }
 
 function renderTaskWorkspace() {
-    elements.datePill.textContent = prettyDateKey(state.selectedDate);
-
     if (!state.student) {
         elements.taskList.innerHTML = emptyStateMarkup(
             "Pick a token",
@@ -297,23 +292,27 @@ function renderTaskRow(task, selectedDayIsToday) {
     const checkbox = fragment.querySelector("input[type=checkbox]");
     const title = fragment.querySelector("h3");
     const badge = fragment.querySelector(".task-badge");
-    const timeLabel = fragment.querySelector(".task-time-label");
     const finishedAt = fragment.querySelector(".task-finished-at");
 
     const completedAt = getCompletionTime(task.id, state.selectedDate);
     const isCompleted = Boolean(completedAt);
     const isPending = state.pendingTaskIds.has(task.id);
     const isReadOnly = state.accessMode === "readonly";
-    const isCheckable = selectedDayIsToday && !isCompleted && !isPending && !isReadOnly;
+    // allow checking on any selected date (history or today), but not when already completed or pending
+    const isCheckable = !isCompleted && !isPending && !isReadOnly;
 
     row.classList.toggle("is-complete", isCompleted);
     row.classList.toggle("is-pending", isPending);
     row.classList.toggle("is-disabled", !isCheckable);
 
     title.textContent = task.name;
-    badge.textContent = `${capitalize(task.repeat_type)} · ${formatTimeType(task.time_type)}`;
-    timeLabel.textContent = isCompleted ? "Completed" : selectedDayIsToday ? "Ready to complete" : "History only";
-    finishedAt.textContent = completedAt ? formatFinishedAt(completedAt) : selectedDayIsToday ? "" : "No completion recorded";
+    const repeat = String(task.repeat_type || '').toLowerCase();
+    if (repeat === 'weekly' || repeat === 'monthly') {
+        badge.textContent = capitalize(task.repeat_type);
+    } else {
+        badge.textContent = `${capitalize(task.repeat_type)} · ${formatTimeType(task.time_type)}`;
+    }
+    finishedAt.textContent = completedAt ? `Finished at ${formatFinishedAt(completedAt)}` : "";
 
     checkbox.checked = isCompleted;
     checkbox.disabled = !isCheckable;
@@ -334,7 +333,9 @@ async function completeTask(task) {
     state.pendingTaskIds.add(task.id);
     renderTaskWorkspace();
 
-    const { error } = await state.supabase.from("task_completions").insert({ task_id: task.id });
+    // set finished_at to the selected date (local midnight) so completion records align with the day viewed
+    const finishedAtIso = new Date(parseDateKey(state.selectedDate)).toISOString();
+    const { error } = await state.supabase.from("task_completions").insert({ task_id: task.id, finished_at: finishedAtIso });
     state.pendingTaskIds.delete(task.id);
 
     if (error) {
