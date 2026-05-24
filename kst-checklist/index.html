@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kingston Checklist</title>
+    <meta name="description" content="Student task checklist powered by Supabase." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script>
+        window.SUPABASE_CONFIG = {
+            url: "https://aquyeqwzbuxmufdlaufi.supabase.co",
+            anonKey: "sb_publishable_3jFQpcGGkSZTneGtAKoWcQ_tYb5GhdF",
+            startDate: "2026-05-24",
+        };
+    </script>
+</head>
+
+<body>
+    <div class="page-backdrop page-backdrop--one"></div>
+    <div class="page-backdrop page-backdrop--two"></div>
+
+    <main class="app-shell">
+        <aside class="panel panel--sidebar">
+            <section class="card">
+                <div class="card-head">
+                    <div>
+                        <p class="eyebrow">Student access</p>
+                        <h1>Kingston Checklist</h1>
+                    </div>
+                    <span id="connectionStatus" class="status-pill status-pill--muted">Loading…</span>
+                </div>
+
+                <label class="field-group">
+                    <span class="field-label">Student name</span>
+                    <select id="studentSelect" class="select-control" aria-label="Student name"></select>
+                </label>
+
+                <p id="accessHint" class="card-note"></p>
+            </section>
+
+            <section class="card card--dates">
+                <div class="card-head card-head--compact">
+                    <div>
+                        <p class="eyebrow">Day view</p>
+                        <h2>Dates</h2>
+                    </div>
+                    <span id="rangeStatus" class="status-pill status-pill--muted">Loading…</span>
+                </div>
+
+                <div id="dateList" class="date-list" aria-label="Available dates"></div>
+            </section>
+        </aside>
+
+        <section class="panel panel--content">
+            <section class="card card--workspace">
+                <div class="workspace-head">
+                    <div>
+                        <p class="eyebrow">Checklist</p>
+                        <h2 id="workspaceTitle">Select a student</h2>
+                    </div>
+                    <div class="workspace-meta">
+                        <span id="taskScopePill" class="status-pill status-pill--muted">No data loaded</span>
+                        <span id="datePill" class="status-pill status-pill--accent">Choose a date</span>
+                    </div>
+                </div>
+
+                <p id="workspaceSubtitle" class="card-note card-note--tight">
+                    Use the token in the URL to open one student account, then pick a date from the left rail.
+                </p>
+
+                <div id="taskList" class="task-list" aria-live="polite"></div>
+            </section>
+        </section>
+    </main>
+
+    <template id="dateButtonTemplate">
+        <button type="button" class="date-chip">
+            <span class="date-chip__day"></span>
+            <span class="date-chip__meta"></span>
+        </button>
+    </template>
+
+    <template id="taskRowTemplate">
+        <article class="task-row">
+            <label class="task-row__check">
+                <input type="checkbox" />
+                <span class="task-row__box"></span>
+            </label>
+            <div class="task-row__body">
+                <div class="task-row__topline">
+                    <h3></h3>
+                    <span class="task-badge"></span>
+                </div>
+                <div class="task-row__meta">
+                    <span class="task-time-label"></span>
+                    <span class="task-finished-at"></span>
+                </div>
+            </div>
+        </article>
+    </template>
+
+    <script type="module" src="./app.js"></script>
+</body>
+
+</html>
