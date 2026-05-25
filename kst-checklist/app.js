@@ -139,7 +139,7 @@ async function loadStudents() {
 
     if (!state.students.length) {
         elements.taskList.innerHTML = emptyStateMarkup(
-            "Không có bản ghi học viên",
+            "Không có bản ghi nào",
             "Thêm ít nhất một hàng vào bảng students."
         );
         return;
@@ -275,7 +275,7 @@ function renderTaskWorkspace() {
     if (!state.student) {
         elements.taskList.innerHTML = emptyStateMarkup(
             "Chọn token",
-            "Chọn học viên từ danh sách hoặc thêm ?token=<student-id> vào URL."
+            "Chọn nhân viên từ danh sách hoặc thêm ?token=<student-id> vào URL."
         );
         return;
     }
