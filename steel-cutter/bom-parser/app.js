@@ -160,11 +160,21 @@ function computeMaterialPlan(material) {
     // always use fixed stock length per user request
     const STOCK_LENGTH = 5950;
 
+    // determine a max_pattern_waste based on largest requested piece length
+    // heuristic: allow 80% of the largest requested piece length as waste,
+    // but never less than the Rust default (600)
+    const WASTE_FRACTION = 0.8;
+    const DEFAULT_MAX_PATTERN_WASTE = 600;
+    const maxInputLength = lengths.length ? Math.max(...lengths.map(Number)) : 0;
+    const computedMaxPatternWaste = Math.ceil(WASTE_FRACTION * maxInputLength);
+    const finalMaxPatternWaste = Math.max(DEFAULT_MAX_PATTERN_WASTE, computedMaxPatternWaste);
+
     const input = {
         lengths,
         quantities,
         stock_length: Math.trunc(STOCK_LENGTH),
         bundle_size: 1,
+        max_pattern_waste: finalMaxPatternWaste,
     };
 
     let result = null;
@@ -205,7 +215,11 @@ function renderPlans(plans) {
 
     const fragment = document.createDocumentFragment();
 
-    plans.forEach((plan, index) => {
+    const sortedPlans = plans.slice().sort((left, right) =>
+        materialLabel(left.material).localeCompare(materialLabel(right.material), "vi", { sensitivity: "base" })
+    );
+
+    sortedPlans.forEach((plan, index) => {
         const detail = document.createElement("details");
         detail.className = "material-details";
 
@@ -217,10 +231,10 @@ function renderPlans(plans) {
         const body = document.createElement("div");
         body.className = "material-body";
 
+        body.appendChild(buildSourceBlock(plan));
         if (plan.error) {
             body.appendChild(buildErrorState(plan.error));
         } else {
-            body.appendChild(buildSourceBlock(plan));
             body.appendChild(buildPatternBlock(plan));
         }
 
@@ -263,7 +277,7 @@ function buildSummaryBadges(plan) {
     badges.className = "summary-badges summary-badges--text";
 
     if (plan.error) {
-        badges.textContent = "Lỗi";
+        badges.textContent = plan.error;
     } else {
         const stockQty = document.createElement("strong");
         stockQty.className = "summary-number";
