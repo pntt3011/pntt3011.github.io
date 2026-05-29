@@ -282,7 +282,7 @@ function renderResults(result, stockLength = 0) {
 
     const meta = fragment.querySelector(".result-meta");
     meta.innerHTML = `
-        <strong>${totalBars}</strong> phôi sử dụng &nbsp;·&nbsp; 
+        <strong>${totalBars}</strong> thanh sử dụng &nbsp;·&nbsp; 
         <strong>${totalWaste}</strong> mm dư thừa &nbsp;·&nbsp;
         <strong>${result.percentage_wasted.toFixed(2)}</strong> % dư thừa
     `;
@@ -365,7 +365,7 @@ function exportToExcel(result, stockLength) {
         totalWaste += (p.qty * p.waste);
     }
 
-    rows.push(["Tổng số phôi sử dụng", totalBars, "cây phôi"]);
+    rows.push(["Tổng số thanh sử dụng", totalBars, "cây phôi"]);
     rows.push(["Tổng lượng dư thừa (hao hụt)", totalWaste, "mm"]);
     rows.push(["Tỷ lệ dư thừa", Number(result.percentage_wasted.toFixed(2)), "%"]);
     rows.push([]);
