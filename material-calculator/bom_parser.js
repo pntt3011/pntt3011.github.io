@@ -177,9 +177,10 @@
     }
 
     // Match component rows by pattern *_(TĐ.<colorCode>) in col B; sum part area from col L
-    const COLOR_CODE_RE = /_\(T[Đđ]\.([^)]+)\)/;
+    // Underscore before ( is optional; D may appear with or without the Vietnamese stroke
+    const COLOR_CODE_RE = /\(T[DĐdđ]\.([^)]+)\)/;
 
-    function extractPowderCoating(rows) {
+    function extractPowderCoating(rows, productQty = 1) {
         const result = new Map();
         let currentCode = null;
 
@@ -199,7 +200,7 @@
             if (currentCode !== null) {
                 const area = toNumber(cellAt(rows, r, 11));
                 if (area !== null && area > 0) {
-                    result.set(currentCode, result.get(currentCode) + area);
+                    result.set(currentCode, result.get(currentCode) + area * productQty);
                 }
             }
         }
@@ -352,9 +353,8 @@
 
             const productInfo = extractProductInfo(sheet, sheetName);
             const summary = extractManufacturedSummary(rows);
-            const powderCoating = extractPowderCoating(rows);
-
             const qty = options.sheetQty?.[sheetName] ?? v.productQty;
+            const powderCoating = extractPowderCoating(rows, qty);
 
             products.push({
                 sheetName,
@@ -364,6 +364,7 @@
                 parsedQty: v.productQty,
                 manufacturedWeight: summary?.weight || 0,
                 manufacturedArea: summary?.area || 0,
+                manufacturedVolume: toNumber(sheet['L15']?.v) || 0,
             });
 
             for (const { code, area } of powderCoating) {

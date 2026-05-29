@@ -98,3 +98,215 @@ select:disabled { opacity: 0.5; cursor: not-allowed; background: #f1f5f9; }
   box-shadow: 0 4px 12px rgba(37,99,235,.35);
 }
 .primary-button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.secondary-button {
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--card-border);
+}
+.secondary-button:hover:not(:disabled) {
+  color: #fff;
+  background: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.22);
+}
+.secondary-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: #f8fafc;
+  color: var(--muted);
+}
+
+/* ── Panel header ── */
+
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex: 0 0 auto;
+}
+
+.panel-title { min-width: 0; }
+
+.panel-title h1,
+.panel-title h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--text);
+  font-size: 1.05rem;
+  font-weight: bold;
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+
+.panel-title h1 img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+/* ── Section header ── */
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 0 8px;
+  flex: 0 0 auto;
+}
+
+.section-title {
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.item-count {
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: #f1f5f9;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+/* ── Summary stat cards ── */
+
+.summary-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.summary-stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+
+.summary-stat-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.summary-stat-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.2;
+}
+
+.summary-stat-unit {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* ── Collapsible (accordion) ── */
+
+.results-collapsible {
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  background: #fff;
+  overflow: hidden;
+}
+
+.results-collapsible-header {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.88rem;
+  user-select: none;
+}
+
+.results-collapsible-header::-webkit-details-marker { display: none; }
+.results-collapsible-header:hover { background: #f8fafc; }
+
+.results-collapsible-header .toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  flex: 0 0 auto;
+  transition: transform 0.12s ease;
+}
+
+.results-collapsible[open] .results-collapsible-header .toggle-icon {
+  transform: rotate(180deg);
+}
+
+.results-collapsible-body {
+  border-top: 1px solid var(--card-border);
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+/* ── Empty state ── */
+
+.empty-state,
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 280px;
+  height: 100%;
+  padding: 40px 24px;
+  color: var(--muted);
+}
+
+.empty-state--wide { min-height: 100%; }
+
+.empty-state-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.empty-state h4,
+.error-state h4 {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 1.03rem;
+}
+
+.empty-state p,
+.error-state p {
+  max-width: 38ch;
+  margin: 0;
+  line-height: 1.55;
+}
+
+.error-state .error-detail {
+  margin-top: 10px;
+  max-width: 46ch;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: #fee2e2;
+  color: #991b1b;
+  font-size: 0.84rem;
+  white-space: pre-wrap;
+}

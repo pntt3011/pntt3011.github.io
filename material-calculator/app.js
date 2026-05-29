@@ -37,7 +37,6 @@ function cacheElements() {
     elements.exportButton = document.getElementById("exportButton");
     elements.browseButton = elements.dropzone.querySelector(".browse-button");
     elements.resultsPanelTitle = document.getElementById("resultsPanelTitle");
-    elements.summaryStats = document.getElementById("summaryStats");
     elements.productListSection = document.getElementById("productListSection");
     elements.productList = document.getElementById("productList");
     elements.productCount = document.getElementById("productCount");
@@ -121,9 +120,8 @@ async function handleFile(file) {
     state.powderCoating = [];
     setExportEnabled(false);
     elements.productListSection.hidden = true;
-    elements.summaryStats.hidden = true;
     elements.calculateButton.disabled = true;
-    renderEmptyState("Đang đọc workbook", "Hệ thống đang gom dữ liệu BOM và chuẩn bị tính kế hoạch cắt.");
+    renderEmptyState("Đang đọc workbook", "Hệ thống đang gom dữ liệu BOM.");
 
     try {
         if (!window.XLSX) throw new Error("SheetJS XLSX is not available.");
@@ -174,7 +172,6 @@ function runCalculation() {
     }
 
     renderProducts(state.products);
-    renderSummaryStats(state.products);
     renderPlans(state.plans);
     setExportEnabled(state.plans.length > 0);
     elements.calculateButton.disabled = false;
@@ -345,130 +342,138 @@ function renderProducts(products) {
     elements.productList.appendChild(fragment);
 }
 
-// ── Summary stats ─────────────────────────────────────────────────────────────
+// ── Stats ─────────────────────────────────────────────────────────────────────
 
 function computeTotalStats(products) {
     let totalWeight = 0;
     let totalArea = 0;
+    let totalVolume = 0;
 
     for (const p of products) {
         const cfg = state.productConfigs[p.sheetName];
         const currentQty = cfg ? cfg.qty : p.qty;
         const enabled = cfg ? cfg.enabled : true;
-        if (!enabled || !currentQty || !p.parsedQty) continue;
-        const scale = currentQty / p.parsedQty;
-        totalWeight += p.manufacturedWeight * scale;
-        totalArea += p.manufacturedArea * scale;
+        if (!enabled || !currentQty) continue;
+        totalWeight += p.manufacturedWeight * currentQty;
+        totalArea += p.manufacturedArea * currentQty;
+        totalVolume += (p.manufacturedVolume || 0) * currentQty;
     }
 
-    return { totalWeight, totalArea };
+    return { totalWeight, totalArea, totalVolume };
 }
 
-function renderSummaryStats(products) {
-    if (!products.length) {
-        elements.summaryStats.hidden = true;
-        return;
-    }
-
-    const { totalWeight, totalArea } = computeTotalStats(products);
-
-    elements.summaryStats.hidden = false;
-    elements.summaryStats.innerHTML = "";
+function buildStatCardsRow(products) {
+    const { totalWeight, totalArea, totalVolume } = computeTotalStats(products);
+    const row = document.createElement("div");
+    row.className = "summary-stats";
 
     const cards = [
-        {
-            label: "Trọng lượng SX",
-            value: areaFormatter.format(totalWeight),
-            unit: "kg",
-        },
-        {
-            label: "Diện tích SX",
-            value: areaFormatter.format(totalArea),
-            unit: "m²",
-        },
-        {
-            label: "Thể tích SX",
-            value: "0",
-            unit: "m³",
-        },
+        { label: "Trọng lượng SX", value: areaFormatter.format(totalWeight), unit: "kg" },
+        { label: "Diện tích SX", value: areaFormatter.format(totalArea), unit: "m²" },
+        { label: "Thể tích SX", value: areaFormatter.format(totalVolume), unit: "m³" },
     ];
 
     for (const card of cards) {
         const el = document.createElement("div");
         el.className = "summary-stat-card";
-
         const labelEl = document.createElement("span");
         labelEl.className = "summary-stat-label";
         labelEl.textContent = card.label;
-
         const valueEl = document.createElement("strong");
         valueEl.className = "summary-stat-value";
         valueEl.textContent = card.value;
-
         const unitEl = document.createElement("span");
         unitEl.className = "summary-stat-unit";
         unitEl.textContent = card.unit;
-
         el.appendChild(labelEl);
         el.appendChild(valueEl);
         el.appendChild(unitEl);
-        elements.summaryStats.appendChild(el);
+        row.appendChild(el);
     }
+
+    return row;
 }
 
 // ── Cutting plans ─────────────────────────────────────────────────────────────
 
+function makeCollapsible(titleText, buildBody, defaultOpen = true) {
+    const details = document.createElement("details");
+    details.className = "results-collapsible";
+    details.open = defaultOpen;
+
+    const summary = document.createElement("summary");
+    summary.className = "results-collapsible-header";
+    summary.innerHTML = `
+        <span class="toggle-icon" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+        </span>`;
+    const titleEl = document.createElement("span");
+    titleEl.textContent = titleText;
+    summary.appendChild(titleEl);
+    details.appendChild(summary);
+
+    const body = document.createElement("div");
+    body.className = "results-collapsible-body";
+    buildBody(body);
+    details.appendChild(body);
+
+    return details;
+}
+
 function renderPlans(plans) {
     if (elements.resultsPanelTitle) {
         elements.resultsPanelTitle.textContent = state.order_name
-            ? `Kế hoạch cắt ${state.order_name}`
-            : "Kế hoạch cắt";
+            ? `Thông tin lệnh sản xuất ${state.order_name}`
+            : "Thông tin lệnh sản xuất";
     }
 
     elements.resultsList.innerHTML = "";
-
-    if (!plans.length) {
-        renderEmptyState(
-            "Không tìm thấy nhóm vật liệu",
-            "Workbook hợp lệ nhưng không có dòng BOM nào đủ dữ liệu để tính kế hoạch cắt."
-        );
-        return;
-    }
-
     const fragment = document.createDocumentFragment();
 
-    const sortedPlans = plans.slice().sort((left, right) =>
-        materialLabel(left.material).localeCompare(materialLabel(right.material), "vi", { sensitivity: "base" })
-    );
+    // Stat cards — scrolls with content
+    fragment.appendChild(buildStatCardsRow(state.products));
 
-    sortedPlans.forEach((plan) => {
-        const isAlert = !plan.error && plan.result?.percentage_wasted >= WASTE_ALERT_PCT;
-
-        const detail = document.createElement("details");
-        detail.className = "material-details" + (isAlert ? " material-details--alert" : "");
-
-        const summary = document.createElement("summary");
-        summary.appendChild(buildSummaryText(plan));
-        summary.appendChild(buildSummaryBadges(plan, isAlert));
-        detail.appendChild(summary);
-
-        const body = document.createElement("div");
-        body.className = "material-body";
-
-        if (plan.error) {
-            body.appendChild(buildErrorState(plan.error));
-        } else {
-            body.appendChild(buildPatternBlock(plan));
+    // Cutting plans collapsible
+    fragment.appendChild(makeCollapsible("Kế hoạch cắt phôi", (body) => {
+        if (!plans.length) {
+            const empty = document.createElement("p");
+            empty.className = "results-section-empty";
+            empty.textContent = "Không tìm thấy nhóm vật liệu nào đủ dữ liệu.";
+            body.appendChild(empty);
+            return;
         }
 
-        detail.appendChild(body);
-        fragment.appendChild(detail);
-    });
+        const sortedPlans = plans.slice().sort((a, b) =>
+            materialLabel(a.material).localeCompare(materialLabel(b.material), "vi", { sensitivity: "base" })
+        );
 
-    // Powder coating section
-    if (state.powderCoating.length) {
-        fragment.appendChild(buildPowderCoatingSection(state.powderCoating));
-    }
+        sortedPlans.forEach((plan) => {
+            const isAlert = !plan.error && plan.result?.percentage_wasted >= WASTE_ALERT_PCT;
+
+            const detail = document.createElement("details");
+            detail.className = "material-details" + (isAlert ? " material-details--alert" : "");
+
+            const summary = document.createElement("summary");
+            summary.appendChild(buildSummaryText(plan));
+            summary.appendChild(buildSummaryBadges(plan, isAlert));
+            detail.appendChild(summary);
+
+            const bodyEl = document.createElement("div");
+            bodyEl.className = "material-body";
+            bodyEl.appendChild(plan.error ? buildErrorState(plan.error) : buildPatternBlock(plan));
+            detail.appendChild(bodyEl);
+
+            body.appendChild(detail);
+        });
+    }, false));
+
+    // Powder coating collapsible
+    fragment.appendChild(makeCollapsible("Yêu cầu sơn", (body) => {
+        body.appendChild(buildPowderCoatingContent(state.powderCoating));
+    }, false));
 
     elements.resultsList.appendChild(fragment);
 }
@@ -518,10 +523,11 @@ function buildSummaryBadges(plan, isAlert) {
         const badge = document.createElement("span");
         badge.className = "waste-badge" + (isAlert ? " waste-badge--alert" : " waste-badge--ok");
 
+        badge.appendChild(document.createTextNode("Cần "));
         badge.appendChild(stockQty);
-        badge.appendChild(document.createTextNode(" phôi   "));
+        badge.appendChild(document.createTextNode(" thanh, dư "));
         badge.appendChild(wastePct);
-        badge.appendChild(document.createTextNode("% dư thừa"));
+        badge.appendChild(document.createTextNode("%"));
 
         badges.appendChild(badge);
     }
@@ -624,13 +630,13 @@ function buildPatternBlock(plan) {
 
 // ── Powder coating ────────────────────────────────────────────────────────────
 
-function buildPowderCoatingSection(powderCoating) {
-    const section = document.createElement("section");
-    section.className = "powder-coating-section";
-
-    const title = document.createElement("div");
-    title.className = "powder-coating-title";
-    title.textContent = "Yêu cầu sơn";
+function buildPowderCoatingContent(powderCoating) {
+    if (!powderCoating.length) {
+        const empty = document.createElement("p");
+        empty.className = "results-section-empty";
+        empty.textContent = "Không tìm thấy dữ liệu mã màu trong file.";
+        return empty;
+    }
 
     const table = document.createElement("table");
     table.className = "coating-table";
@@ -651,10 +657,7 @@ function buildPowderCoatingSection(powderCoating) {
         tbody.appendChild(tr);
     }
     table.appendChild(tbody);
-
-    section.appendChild(title);
-    section.appendChild(table);
-    return section;
+    return table;
 }
 
 // ── Excel export ──────────────────────────────────────────────────────────────
@@ -666,7 +669,7 @@ function exportExcel() {
     const safeOrder = rawOrder
         ? rawOrder.replace(/[^0-9A-Za-z]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '').slice(0, 120)
         : '';
-    const fileName = safeOrder ? `KeHoachCat_${safeOrder}.xlsx` : `KeHoachCat.xlsx`;
+    const fileName = safeOrder ? `VatTu_${safeOrder}.xlsx` : `KeHoachCat.xlsx`;
     const workbook = XLSX.utils.book_new();
     const thinBorder = {
         top: { style: "thin", color: { rgb: "000000" } },
@@ -678,15 +681,54 @@ function exportExcel() {
     const headerFill = { patternType: "solid", fgColor: { rgb: "F8FAFC" } };
 
     const summaryRows = [];
-    const titleRow = 0;
-    const orderRow = summaryRows.length;
+    const summaryTitleRows = [];
+    const summaryTableHeaderRows = [];
+
+    // ── Title ──────────────────────────────────────────────────────────────
+    summaryTitleRows.push(summaryRows.length);
     summaryRows.push([state.order_name ? "LSX " + state.order_name : "Lệnh sản xuất"]);
     summaryRows.push([]);
 
-    const summaryHeaderRow = summaryRows.length;
-    summaryRows.push(["TỔNG HỢP"]);
-    summaryRows.push(["Số loại vật liệu", state.plans.length]);
-    summaryRows.push(["Chiều dài phôi gốc", 5950, "mm"]);
+    // ── Manufactured stats ─────────────────────────────────────────────────
+    summaryTitleRows.push(summaryRows.length);
+    summaryRows.push(["THÔNG TIN SẢN XUẤT"]);
+    const { totalWeight, totalArea, totalVolume } = computeTotalStats(state.products);
+    summaryRows.push(["Trọng lượng SX", Number(totalWeight.toFixed(2)), "kg"]);
+    summaryRows.push(["Diện tích SX", Number(totalArea.toFixed(2)), "m²"]);
+    summaryRows.push(["Thể tích SX", Number(totalVolume.toFixed(4)), "m³"]);
+    summaryRows.push([]);
+
+    // ── Product list ───────────────────────────────────────────────────────
+    summaryTitleRows.push(summaryRows.length);
+    summaryRows.push(["DANH SÁCH SẢN PHẨM"]);
+    summaryTableHeaderRows.push(summaryRows.length);
+    summaryRows.push(["Tên sản phẩm", "Mã", "Số lượng"]);
+    const productGroups = groupProductsByCode(state.products);
+    for (const [code, group] of productGroups) {
+        const totalQty = group.reduce((sum, p) => {
+            const cfg = state.productConfigs[p.sheetName];
+            return sum + (cfg ? cfg.qty : p.qty);
+        }, 0);
+        summaryRows.push([group[0].name, code, totalQty]);
+    }
+    summaryRows.push([]);
+
+    // ── Powder coating ─────────────────────────────────────────────────────
+    summaryTitleRows.push(summaryRows.length);
+    summaryRows.push(["YÊU CẦU SƠN"]);
+    summaryTableHeaderRows.push(summaryRows.length);
+    summaryRows.push(["Mã màu", "Diện tích (m²)"]);
+    for (const { code, area } of state.powderCoating) {
+        summaryRows.push([code, Number(area.toFixed(2))]);
+    }
+    if (!state.powderCoating.length) summaryRows.push(["—", ""]);
+    summaryRows.push([]);
+
+    // ── Cutting summary ────────────────────────────────────────────────────
+    summaryTitleRows.push(summaryRows.length);
+    summaryRows.push(["TỔNG HỢP CẮT PHÔI"]);
+    summaryRows.push(["Số nhóm vật liệu", state.plans.length]);
+    summaryRows.push(["Chiều dài vật liệu", 5950, "mm"]);
 
     let totalBars = 0, totalWaste = 0;
     for (const plan of state.plans) {
@@ -694,14 +736,15 @@ function exportExcel() {
         totalBars += Number(plan.result.stock_qty || 0);
         totalWaste += Number(plan.result.total_waste || 0);
     }
-
-    summaryRows.push(["Tổng số phôi sử dụng", totalBars, "cây phôi"]);
+    summaryRows.push(["Tổng số thanh vật liệu sử dụng", totalBars, "cây phôi"]);
     summaryRows.push(["Tổng lượng dư thừa", totalWaste, "mm"]);
     summaryRows.push([]);
 
     const detailHeaderRow = summaryRows.length;
+    summaryTitleRows.push(detailHeaderRow);
     summaryRows.push(["CHI TIẾT THEO NHÓM VẬT LIỆU"]);
-    summaryRows.push(["Vật liệu", "Số dòng BOM", "Số chi tiết", "Số phôi", "Tổng dư thừa (mm)", "Tỷ lệ dư (%)"]);
+    summaryTableHeaderRows.push(summaryRows.length);
+    summaryRows.push(["Vật liệu", "Số nhóm chiều dài cần cắt", "Số chi tiết", "Số thanh", "Tổng dư thừa (mm)", "Tỷ lệ dư (%)"]);
 
     for (const plan of state.plans) {
         summaryRows.push([
@@ -788,10 +831,10 @@ function exportExcel() {
     XLSX.utils.book_append_sheet(workbook, detailSheet, "ChiTiet");
 
     applyWorkbookStyles(summarySheet, {
-        titleRows: [titleRow, summaryHeaderRow, detailHeaderRow],
-        tableHeaderRows: [detailHeaderRow + 1],
+        titleRows: summaryTitleRows,
+        tableHeaderRows: summaryTableHeaderRows,
         mergeRanges: [],
-        columnWidths: [22, 16, 16, 14, 18, 14],
+        columnWidths: [28, 18, 14, 14, 18, 14],
         sectionFill, headerFill, thinBorder,
     });
 
