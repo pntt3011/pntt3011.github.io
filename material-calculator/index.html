@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
 
 <head>
     <meta charset="utf-8" />
@@ -18,9 +18,8 @@
                 <div class="panel-title">
                     <h1>
                         <img src="../steel-cutter/logo.png" alt="" />
-                        Phần mềm cắt phôi
+                        Phần mềm vật tư
                     </h1>
-
                 </div>
                 <span id="appStatus" class="status-pill status-pill--loading">Đang chờ file</span>
             </div>
@@ -37,28 +36,44 @@
                 </div>
                 <div class="dropzone-copy">
                     <h2>Thả file BOM vào đây</h2>
-                    <p>Hỗ trợ .xlsx, .xls, .xlsm. Các sheet hợp lệ sẽ được đọc, lấy số lượng và đưa qua thuật toán cắt.
                     </p>
                 </div>
                 <button type="button" class="secondary-button browse-button">Chọn file Excel</button>
             </div>
 
+            <div id="productListSection" class="product-list-section" hidden>
+                <div class="section-header">
+                    <span class="section-title">Danh sách sản phẩm</span>
+                    <span id="productCount" class="item-count"></span>
+                </div>
+                <div id="productList" class="product-list"></div>
+            </div>
 
-
-
+            <div class="calculate-section">
+                <button id="calculateButton" type="button" class="primary-button calculate-button" disabled>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="4" y="2" width="16" height="20" rx="2"></rect>
+                        <line x1="8" y1="6" x2="16" y2="6"></line>
+                        <line x1="8" y1="10" x2="16" y2="10"></line>
+                        <line x1="8" y1="14" x2="12" y2="14"></line>
+                    </svg>
+                    Tính toán
+                </button>
+            </div>
         </section>
 
         <section class="card results-card">
             <div class="panel-header">
                 <div class="panel-title">
-                    <h2>Kế hoạch cắt</h2>
-
+                    <h2 id="resultsPanelTitle">Kế hoạch cắt</h2>
                 </div>
                 <button id="exportButton" type="button" class="secondary-button export-button" disabled>
                     Xuất Excel
                 </button>
-
             </div>
+
+            <div id="summaryStats" class="summary-stats" hidden></div>
 
             <div id="resultsList" class="results-list">
                 <div class="empty-state empty-state--wide">

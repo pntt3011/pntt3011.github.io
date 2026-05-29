@@ -135,11 +135,84 @@
         ]);
     }
 
+    function normalize(v) {
+        return String(v ?? "")
+            .trim()
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[̀-ͯ]/g, "")
+            .replace(/[:：]/g, "")
+            .replace(/\s+/g, " ");
+    }
+
+    // Read product info directly from the sheet object using Excel cell addresses (1-indexed)
+    function extractProductInfo(sheet, sheetName) {
+        const name = cleanText(sheet['G6']?.v ?? '');
+        const code = cleanText(sheet['G7']?.v ?? '');
+        return { name: name || sheetName, code: code || sheetName };
+    }
+
+    // Find "Cộng - TOTAL" in column B after "PHẦN SẮT" marker; read weight (col K=10), area (col L=11)
+    function extractManufacturedSummary(rows) {
+        let phanSatRow = -1;
+        for (let r = 0; r < rows.length; r++) {
+            const cell = normalize(cleanText(cellAt(rows, r, 1)));
+            if (cell.includes('phan sat')) {
+                phanSatRow = r;
+                break;
+            }
+        }
+        if (phanSatRow < 0) return null;
+
+        for (let r = phanSatRow + 1; r < rows.length; r++) {
+            const cell = normalize(cleanText(cellAt(rows, r, 1)));
+            if (cell.includes('cong') && cell.includes('total')) {
+                return {
+                    weight: toNumber(cellAt(rows, r, 10)) || 0,
+                    area: toNumber(cellAt(rows, r, 11)) || 0
+                };
+            }
+        }
+        return null;
+    }
+
+    // Match component rows by pattern *_(TĐ.<colorCode>) in col B; sum part area from col L
+    const COLOR_CODE_RE = /_\(T[Đđ]\.([^)]+)\)/;
+
+    function extractPowderCoating(rows) {
+        const result = new Map();
+        let currentCode = null;
+
+        for (let r = 0; r < rows.length; r++) {
+            const colB = cleanText(cellAt(rows, r, 1));
+            const normB = normalize(colB);
+
+            if (normB.includes('cong') && normB.includes('total')) break;
+
+            const match = colB.match(COLOR_CODE_RE);
+            if (match) {
+                currentCode = match[1].trim();
+                if (!result.has(currentCode)) result.set(currentCode, 0);
+                continue;
+            }
+
+            if (currentCode !== null) {
+                const area = toNumber(cellAt(rows, r, 11));
+                if (area !== null && area > 0) {
+                    result.set(currentCode, result.get(currentCode) + area);
+                }
+            }
+        }
+
+        return Array.from(result.entries()).map(([code, area]) => ({ code, area }));
+    }
+
     function parseBomSheet(rows, sheetName, options = {}) {
         const validation = validateBomSheet(rows, sheetName);
         if (!validation.valid) return new Map();
 
         const productQty = options.productQtyOverride ?? validation.productQty;
+        const productCode = options.productCode ?? sheetName;
         const cols = getColumns(rows, validation.headerRow);
         const grouped = new Map();
 
@@ -165,26 +238,25 @@
             if (!qtyPerProduct || !length || !type || !shape) continue;
             if (boxWidth === null || thickness === null) continue;
 
-            const material = {
-                box_width: boxWidth,
-                box_length: boxLength,
-                type,
-                shape,
-                thickness
-            };
+            // Skip flat sheets (la dẹt)
+            if (normalize(shape) === 'la det') continue;
 
+            const material = { box_width: boxWidth, box_length: boxLength, type, shape, thickness };
             const key = makeKey(material);
             const totalQty = Math.round(qtyPerProduct * productQty);
 
             if (!grouped.has(key)) {
-                grouped.set(key, {
-                    ...material,
-                    usageMap: new Map()
-                });
+                grouped.set(key, { ...material, usageMap: new Map() });
             }
 
             const item = grouped.get(key);
-            item.usageMap.set(length, (item.usageMap.get(length) || 0) + totalQty);
+            const existing = item.usageMap.get(length);
+            if (!existing) {
+                item.usageMap.set(length, { qty: totalQty, productCodes: new Set([productCode]) });
+            } else {
+                existing.qty += totalQty;
+                existing.productCodes.add(productCode);
+            }
         }
 
         return grouped;
@@ -193,13 +265,23 @@
     function mergeGrouped(target, source) {
         for (const [key, item] of source.entries()) {
             if (!target.has(key)) {
-                target.set(key, item);
+                const cloned = { ...item, usageMap: new Map() };
+                for (const [len, data] of item.usageMap.entries()) {
+                    cloned.usageMap.set(len, { qty: data.qty, productCodes: new Set(data.productCodes) });
+                }
+                target.set(key, cloned);
                 continue;
             }
 
             const existing = target.get(key);
-            for (const [length, qty] of item.usageMap.entries()) {
-                existing.usageMap.set(length, (existing.usageMap.get(length) || 0) + qty);
+            for (const [length, data] of item.usageMap.entries()) {
+                const existingData = existing.usageMap.get(length);
+                if (!existingData) {
+                    existing.usageMap.set(length, { qty: data.qty, productCodes: new Set(data.productCodes) });
+                } else {
+                    existingData.qty += data.qty;
+                    for (const code of data.productCodes) existingData.productCodes.add(code);
+                }
             }
         }
     }
@@ -214,25 +296,17 @@
                 thickness: item.thickness,
                 usage: Array.from(item.usageMap.entries())
                     .sort((a, b) => Number(a[0]) - Number(b[0]))
-                    .map(([length, qty]) => ({ length, qty }))
+                    .map(([length, { qty, productCodes }]) => ({
+                        length, qty,
+                        productCodes: Array.from(productCodes)
+                    }))
             }))
         };
-    }
-
-    function normalize(v) {
-        return String(v ?? "")
-            .trim()
-            .toLowerCase()
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "") // remove accents
-            .replace(/[:：]/g, "")
-            .replace(/\s+/g, " ");
     }
 
     function extractOrderName(workbook) {
         const TARGET_SHEETS = ["lsx go", "lsx sat"];
 
-        // Expecting SheetJS workbook: SheetNames + Sheets
         if (!workbook || !Array.isArray(workbook.SheetNames)) return null;
 
         for (const sheetName of workbook.SheetNames) {
@@ -256,10 +330,11 @@
         return null;
     }
 
-
     function parseWorkbook(workbook, options = {}) {
         const allGrouped = new Map();
         const validation = [];
+        const products = [];
+        const powderCoatingMap = new Map();
 
         for (const sheetName of workbook.SheetNames) {
             const sheet = workbook.Sheets[sheetName];
@@ -275,41 +350,57 @@
 
             if (!v.valid) continue;
 
+            const productInfo = extractProductInfo(sheet, sheetName);
+            const summary = extractManufacturedSummary(rows);
+            const powderCoating = extractPowderCoating(rows);
+
+            const qty = options.sheetQty?.[sheetName] ?? v.productQty;
+
+            products.push({
+                sheetName,
+                code: productInfo.code,
+                name: productInfo.name,
+                qty,
+                parsedQty: v.productQty,
+                manufacturedWeight: summary?.weight || 0,
+                manufacturedArea: summary?.area || 0,
+            });
+
+            for (const { code, area } of powderCoating) {
+                powderCoatingMap.set(code, (powderCoatingMap.get(code) || 0) + area);
+            }
+
             const grouped = parseBomSheet(rows, sheetName, {
-                productQtyOverride: options.sheetQty?.[sheetName]
+                productQtyOverride: options.sheetQty?.[sheetName],
+                productCode: productInfo.code
             });
 
             mergeGrouped(allGrouped, grouped);
         }
 
         const result = finalize(allGrouped);
+        result.products = products;
+        result.powder_coating = Array.from(powderCoatingMap.entries())
+            .map(([code, area]) => ({ code, area }))
+            .sort((a, b) => a.code.localeCompare(b.code));
 
-        // include extracted order name when available (supports SheetJS and ExcelJS workbooks)
         try {
             const orderName = extractOrderName(workbook);
-            if (orderName) result.order_name = orderName;
-            else result.order_name = null;
+            result.order_name = orderName ?? null;
         } catch (e) {
             result.order_name = null;
         }
 
-        if (options.includeValidation) {
-            result.validation = validation;
-        }
+        if (options.includeValidation) result.validation = validation;
 
         return result;
     }
 
     async function parseBomFile(file, options = {}) {
-        if (!global.XLSX) {
-            throw new Error('SheetJS XLSX is required');
-        }
+        if (!global.XLSX) throw new Error('SheetJS XLSX is required');
 
         const buffer = await file.arrayBuffer();
-        const workbook = global.XLSX.read(buffer, {
-            type: 'array',
-            cellDates: false
-        });
+        const workbook = global.XLSX.read(buffer, { type: 'array', cellDates: false });
 
         return parseWorkbook(workbook, options);
     }
