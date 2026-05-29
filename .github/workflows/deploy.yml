@@ -21,7 +21,7 @@ jobs:
         run: cargo install wasm-pack --locked
 
       - name: Build wasm library
-        working-directory: ./steel-cutter/lib
+        working-directory: ./shared/lib
         run: wasm-pack build --target web --release
 
       - name: Upload Artifacts
