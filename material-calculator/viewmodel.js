@@ -9,6 +9,15 @@ const STOCK_LENGTH = 5950;
 const STOCK_DISPLAY_OFFSET = 50;
 const DEFAULT_MAX_PATTERN_WASTE = 600;
 
+// Optimal stock-length search parameters (mirrors Rust defaults in lib.rs).
+const OPT_STOCK_STEP = 100;
+const OPT_MAX_CANDIDATES = 300;
+const OPT_REFINE = true;
+const OPT_REFINE_TOP_K = 10;
+const OPT_REFINE_RADIUS = OPT_STOCK_STEP * 2;
+const OPT_REFINE_STEP = 10;
+const OPT_INCLUDE_COMBINATION_CANDIDATES = true;
+
 export function buildViewModel(parsedResult, productConfigs) {
     const { products = [], order_name = null } = parsedResult;
 
@@ -273,6 +282,13 @@ export function computeOptimalMaterialPlan(material) {
         bundle_size: 1,
         max_pattern_waste: maxPatternWaste,
         max_stock_length: STOCK_LENGTH,
+        stock_step: OPT_STOCK_STEP,
+        max_candidates: OPT_MAX_CANDIDATES,
+        refine: OPT_REFINE,
+        refine_top_k: OPT_REFINE_TOP_K,
+        refine_radius: OPT_REFINE_RADIUS,
+        refine_step: OPT_REFINE_STEP,
+        include_combination_candidates: OPT_INCLUDE_COMBINATION_CANDIDATES,
     };
 
     let result = null;

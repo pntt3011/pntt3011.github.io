@@ -229,7 +229,7 @@ pub fn compute_optimal_stock_cutting_plan(
     }
 
     let stock_step = input.stock_step.unwrap_or(100).max(1);
-    let max_candidates = input.max_candidates.unwrap_or(200).max(1);
+    let max_candidates = input.max_candidates.unwrap_or(300).max(1);
 
     let mut candidates = generate_stock_candidates(
         &input,
@@ -304,7 +304,7 @@ pub fn compute_optimal_stock_cutting_plan(
     }
 
     if input.refine.unwrap_or(true) && !valid_results.is_empty() {
-        let refine_top_k = input.refine_top_k.unwrap_or(5).max(1);
+        let refine_top_k = input.refine_top_k.unwrap_or(10).max(1);
         let refine_radius = input
             .refine_radius
             .unwrap_or(stock_step.saturating_mul(2))
@@ -506,7 +506,7 @@ fn add_combination_stock_candidates(
 
     useful.sort_unstable_by(|a, b| b.cmp(a));
     useful.dedup();
-    useful.truncate(10);
+    useful.truncate(18);
 
     for &len in &useful {
         let mut used = len;
@@ -536,7 +536,7 @@ fn add_combination_stock_candidates(
                     set.insert(base);
                 }
             }
-            for k in j..useful.len().min(j + 4) {
+            for k in j..useful.len().min(j + 8) {
                 if set.len() >= limit {
                     break 'outer;
                 }
@@ -623,7 +623,7 @@ fn score_cutting_result(stock: u32, result: &CuttingResult) -> Vec<u64> {
         secondary_qty as u64,
         overproduced,
         result.patterns.len() as u64,
-        stock as u64,
+        result.stock_qty as u64, // prefer fewer bars when total material is tied
     ]
 }
 
