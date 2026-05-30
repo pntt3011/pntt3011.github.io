@@ -141,21 +141,33 @@ function buildStatCardsRow(steelWeight, steelArea, woodArea, woodVolume) {
 }
 
 function buildCuttingWasteBadge(plans) {
-    let totalWasteMm = 0;
-    let totalStockMm = 0;
+    const { calcSteelWeightPerUnit } = window.BomParser;
+    let totalWasteKg = 0;
+    let totalStockKg = 0;
+
     for (const plan of plans) {
         if (!plan.result) continue;
-        totalWasteMm += Number(plan.result.total_waste || 0);
-        totalStockMm += Number(plan.result.stock_qty || 0) * Number(plan.input.stock_length || 0);
+
+        // Weight of 1 mm of this profile (kg/mm), used to convert lengths → weights
+        const kgPerMm = calcSteelWeightPerUnit({
+            box_width:  plan.material.box_width,
+            box_height: plan.material.box_length,
+            length:     1,
+            thickness:  plan.material.thickness,
+            shape:      plan.material.shape,
+            type:       plan.material.type,
+        });
+
+        totalWasteKg += kgPerMm * Number(plan.result.total_waste || 0);
+        totalStockKg += kgPerMm * Number(plan.result.stock_qty || 0) * Number(plan.input.stock_length || 0);
     }
-    if (!totalStockMm) return null;
 
-    const wasteM = totalWasteMm / 1000;
-    const wastePct = (totalWasteMm / totalStockMm) * 100;
+    if (!totalStockKg) return null;
 
+    const wastePct = (totalWasteKg / totalStockKg) * 100;
     const badge = document.createElement('span');
     badge.className = 'collapsible-waste-badge';
-    badge.textContent = `Hao hụt ${wasteM.toFixed(2)} m (${wastePct.toFixed(2)}%)`;
+    badge.textContent = `Hao hụt ${areaFormatter.format(totalWasteKg)} kg (${wastePct.toFixed(2)}%)`;
     return badge;
 }
 

@@ -317,7 +317,7 @@ function renderResults(result, stockLength = 0) {
         const footer = document.createElement("div");
         footer.className = "pattern-footer";
         footer.innerHTML = `
-            <span class="waste-tag">dư ${pattern.waste} mm trong ${stockLength} mm</span>
+            <span class="waste-tag">hao hụt ${pattern.waste} mm trong ${stockLength} mm</span>
         `;
         item.appendChild(footer);
 
