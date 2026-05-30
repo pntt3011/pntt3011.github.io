@@ -338,6 +338,17 @@ body {
 
 .collapsible-waste-badge--clickable {
   cursor: pointer;
+  position: relative;
+}
+
+/* Expand touch target to full header height without changing visual size */
+.collapsible-waste-badge--clickable::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -40px;
+  bottom: -40px;
 }
 
 .collapsible-waste-badge--clickable.collapsible-waste-badge--inactive:hover {
@@ -380,6 +391,10 @@ body {
 }
 
 /* ── Material details ── */
+
+.material-details + .material-details {
+  margin-top: 8px;
+}
 
 .material-details {
   border: 1px solid var(--card-border);

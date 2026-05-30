@@ -163,24 +163,34 @@ function runCalculation() {
     scheduleOptimization(state.optimizationId);
 }
 
-function scheduleOptimization(id) {
-    const materials = state.viewModel?.materials;
-    if (!materials?.length) return;
+const WASTE_ALERT_PCT = 1.0;
 
-    const optimizedPlans = new Array(materials.length).fill(null);
+function needsOptimization(plan) {
+    return !plan.error && plan.result?.percentage_wasted >= WASTE_ALERT_PCT;
+}
+
+function scheduleOptimization(id) {
+    const plans = state.viewModel?.plans;
+    if (!plans?.length) return;
+
+    const optimizedPlans = new Array(plans.length).fill(null);
     let index = 0;
 
     function step() {
         // Abort if a newer calculation has started.
         if (id !== state.optimizationId) return;
 
-        if (index >= materials.length) {
+        if (index >= plans.length) {
             state.viewModel = { ...state.viewModel, optimizedPlans };
             Render.refreshCuttingSection(state.viewModel);
             return;
         }
 
-        optimizedPlans[index] = computeOptimalMaterialPlan(materials[index]);
+        const plan = plans[index];
+        // Only run the optimizer for red-alert materials; reuse the original plan otherwise.
+        optimizedPlans[index] = needsOptimization(plan)
+            ? computeOptimalMaterialPlan(plan.material)
+            : plan;
         index++;
         setTimeout(step, 0);
     }
