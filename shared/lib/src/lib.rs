@@ -229,7 +229,7 @@ pub fn compute_optimal_stock_cutting_plan(
     }
 
     let stock_step = input.stock_step.unwrap_or(100).max(1);
-    let max_candidates = input.max_candidates.unwrap_or(512).max(1);
+    let max_candidates = input.max_candidates.unwrap_or(200).max(1);
 
     let mut candidates = generate_stock_candidates(
         &input,
@@ -248,24 +248,19 @@ pub fn compute_optimal_stock_cutting_plan(
     let mut valid_results: Vec<(Vec<u64>, u32, CuttingResult)> = Vec::new();
     let mut best_primary_cost: Option<u64> = None;
 
+    // Sort by lower-bound L×⌈S/L⌉ so the most-promising candidates are evaluated
+    // first, establishing a tight upper bound that prunes everything after the break.
+    candidates.sort_unstable_by_key(|&l| {
+        ceil_div(total_req_len, l as u64) as u64 * l as u64
+    });
+
     for &stock in candidates.iter() {
+        let lb_qty = ceil_div(total_req_len, stock as u64) as u64;
+        let lb_cost = lb_qty.saturating_mul(stock as u64);
         if let Some(best_cost) = best_primary_cost {
-            let lb_qty = ceil_div(total_req_len, stock as u64) as u64;
-            let lb_cost = lb_qty.saturating_mul(stock as u64);
             if lb_cost > best_cost {
-                summaries.push(StockCandidateResult {
-                    stock_length: stock,
-                    stock_qty: 0,
-                    total_stock_length: lb_cost,
-                    total_waste: 0,
-                    percentage_wasted: 0.0,
-                    pattern_count: 0,
-                    secondary_stock_qty: 0,
-                    overproduced_length: 0,
-                    valid: false,
-                    error: Some("pruned by lower bound".to_string()),
-                });
-                continue;
+                // Candidates are lb-sorted, so all remaining ones are also pruned.
+                break;
             }
         }
 
@@ -309,7 +304,7 @@ pub fn compute_optimal_stock_cutting_plan(
     }
 
     if input.refine.unwrap_or(true) && !valid_results.is_empty() {
-        let refine_top_k = input.refine_top_k.unwrap_or(12).max(1);
+        let refine_top_k = input.refine_top_k.unwrap_or(5).max(1);
         let refine_radius = input
             .refine_radius
             .unwrap_or(stock_step.saturating_mul(2))
@@ -321,13 +316,19 @@ pub fn compute_optimal_stock_cutting_plan(
 
         valid_results.sort_by(|a, b| a.0.cmp(&b.0));
 
-        let mut refined = std::collections::BTreeSet::new();
+        // O(1) membership check — avoids the O(n²) summaries.iter().any() scan.
+        let evaluated: std::collections::HashSet<u32> =
+            summaries.iter().map(|s| s.stock_length).collect();
+
+        let mut new_candidates: Vec<u32> = Vec::new();
         for (_, stock, _) in valid_results.iter().take(refine_top_k) {
             let start = stock.saturating_sub(refine_radius).max(min_stock);
             let end = stock.saturating_add(refine_radius).min(max_stock);
             let mut s = start;
             while s <= end {
-                refined.insert(s);
+                if !evaluated.contains(&s) {
+                    new_candidates.push(s);
+                }
                 match s.checked_add(refine_step) {
                     Some(next) if next > s => s = next,
                     _ => break,
@@ -335,18 +336,21 @@ pub fn compute_optimal_stock_cutting_plan(
             }
         }
 
-        for s in refined {
-            if !candidates.contains(&s) {
-                candidates.push(s);
-            }
-        }
+        new_candidates.sort_unstable();
+        new_candidates.dedup();
 
-        candidates.sort_unstable();
-        candidates.dedup();
+        // Sort new candidates by lb and prune before solving.
+        new_candidates.sort_unstable_by_key(|&l| {
+            ceil_div(total_req_len, l as u64) as u64 * l as u64
+        });
 
-        for &stock in candidates.iter() {
-            if summaries.iter().any(|x| x.stock_length == stock) {
-                continue;
+        for &stock in new_candidates.iter() {
+            let lb_qty = ceil_div(total_req_len, stock as u64) as u64;
+            let lb_cost = lb_qty.saturating_mul(stock as u64);
+            if let Some(best_cost) = best_primary_cost {
+                if lb_cost > best_cost {
+                    break;
+                }
             }
 
             let trial = CuttingInput {
@@ -363,6 +367,10 @@ pub fn compute_optimal_stock_cutting_plan(
                     let summary = summarize_candidate(stock, &result);
                     if result.valid {
                         let score = score_cutting_result(stock, &result);
+                        best_primary_cost = Some(match best_primary_cost {
+                            None => score[0],
+                            Some(current) => current.min(score[0]),
+                        });
                         valid_results.push((score, stock, result));
                     }
                     summaries.push(summary);
@@ -498,7 +506,7 @@ fn add_combination_stock_candidates(
 
     useful.sort_unstable_by(|a, b| b.cmp(a));
     useful.dedup();
-    useful.truncate(18);
+    useful.truncate(10);
 
     for &len in &useful {
         let mut used = len;
@@ -528,7 +536,7 @@ fn add_combination_stock_candidates(
                     set.insert(base);
                 }
             }
-            for k in j..useful.len().min(j + 8) {
+            for k in j..useful.len().min(j + 4) {
                 if set.len() >= limit {
                     break 'outer;
                 }

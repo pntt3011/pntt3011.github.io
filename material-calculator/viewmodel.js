@@ -199,8 +199,7 @@ function aggregateCuttingPlan(products, productConfigs) {
         });
 
     const plans = materials.map(computeMaterialPlan);
-    const optimizedPlans = materials.map(computeOptimalMaterialPlan);
-    return { materials, plans, optimizedPlans };
+    return { materials, plans };
 }
 
 function collectMaterialItems(material) {
@@ -252,7 +251,7 @@ function computeMaterialPlan(material) {
     };
 }
 
-function computeOptimalMaterialPlan(material) {
+export function computeOptimalMaterialPlan(material) {
     const { lengths, quantities, maxPatternWaste } = collectMaterialItems(material);
 
     if (!lengths.length) {

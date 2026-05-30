@@ -100,13 +100,15 @@ export function renderResults(viewModel, { onExportEnabled }) {
     const fragment = document.createDocumentFragment();
 
     fragment.appendChild(buildStatCardsRow(steelWeight, steelArea, woodArea, woodVolume));
-    const { badgeEl, setActiveView, wire } = buildCuttingDualBadge(plans, optimizedPlans ?? plans);
-    fragment.appendChild(makeCollapsible(
+    const { badgeEl, setActiveView, wire } = buildCuttingDualBadge(plans, optimizedPlans);
+    const cuttingSection = makeCollapsible(
         'Kế hoạch cắt sắt',
-        body => wire(buildCuttingPlansContent(body, plans, optimizedPlans ?? plans, setActiveView)),
+        body => wire(buildCuttingPlansContent(body, plans, optimizedPlans, setActiveView)),
         false,
         badgeEl,
-    ));
+    );
+    cuttingSection.dataset.section = 'cutting';
+    fragment.appendChild(cuttingSection);
     fragment.appendChild(makeCollapsible('Yêu cầu sơn sắt', body => { body.appendChild(buildPowderCoatingContent(powderCoating)); }, false));
     fragment.appendChild(makeCollapsible('Yêu cầu sơn gỗ', body => { body.appendChild(buildPowderCoatingContent(woodPainting)); }, false));
 
@@ -155,7 +157,9 @@ function buildCuttingDualBadge(plans, optimizedPlans) {
     container.appendChild(slider);
 
     const beforeBadge = makeSingleWasteBadge(plans, 'Gốc');
-    const afterBadge = makeSingleWasteBadge(optimizedPlans, 'Tối ưu');
+    const afterBadge = optimizedPlans
+        ? makeSingleWasteBadge(optimizedPlans, 'Tối ưu')
+        : makeLoadingBadge('Tối ưu: đang tính…');
     if (afterBadge) afterBadge.classList.add('collapsible-waste-badge--optimized', 'collapsible-waste-badge--inactive');
 
     if (beforeBadge) container.appendChild(beforeBadge);
@@ -228,6 +232,25 @@ function makeSingleWasteBadge(plans, label) {
     return badge;
 }
 
+function makeLoadingBadge(text) {
+    const badge = document.createElement('span');
+    badge.className = 'collapsible-waste-badge collapsible-waste-badge--loading';
+    badge.textContent = text;
+    return badge;
+}
+
+function buildOptimizingState() {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'optimizing-state';
+    wrapper.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+        </svg>
+        <span>Đang tính toán kế hoạch tối ưu…</span>`;
+    return wrapper;
+}
+
 function makeCollapsible(titleText, buildBody, defaultOpen = true, badge = null) {
     const details = document.createElement('details');
     details.className = 'results-collapsible';
@@ -271,7 +294,11 @@ function buildCuttingPlansContent(body, plans, optimizedPlans, setActiveView) {
 
     const afterSection = document.createElement('div');
     afterSection.hidden = true;
-    buildCuttingPlanList(afterSection, optimizedPlans);
+    if (optimizedPlans) {
+        buildCuttingPlanList(afterSection, optimizedPlans);
+    } else {
+        afterSection.appendChild(buildOptimizingState());
+    }
     body.appendChild(afterSection);
 
     return function switchView(view) {
@@ -566,6 +593,25 @@ function buildErrorBlock(message) {
 export function setStatus(element, kind, text) {
     element.className = `status-pill status-pill--${kind}`;
     element.textContent = text;
+}
+
+// ── Targeted section refresh (called after async optimization completes) ───────
+
+export function refreshCuttingSection(viewModel) {
+    const { plans, optimizedPlans } = viewModel;
+    const existing = el.resultsList.querySelector('[data-section="cutting"]');
+    if (!existing) return;
+
+    const wasOpen = existing.open;
+    const { badgeEl, setActiveView, wire } = buildCuttingDualBadge(plans, optimizedPlans);
+    const next = makeCollapsible(
+        'Kế hoạch cắt sắt',
+        body => wire(buildCuttingPlansContent(body, plans, optimizedPlans, setActiveView)),
+        wasOpen,
+        badgeEl,
+    );
+    next.dataset.section = 'cutting';
+    existing.replaceWith(next);
 }
 
 // ── Shared helpers (exported for app.js export logic) ─────────────────────────

@@ -344,6 +344,36 @@ body {
   color: #475569;
 }
 
+@keyframes badge-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+
+.collapsible-waste-badge--loading {
+  color: var(--muted);
+  animation: badge-pulse 1.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.optimizing-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 12px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.optimizing-state svg {
+  flex: 0 0 auto;
+  animation: spin 1s linear infinite;
+  color: var(--accent);
+}
+
 .results-collapsible-body .coating-table {
   margin: -10px -12px;
   width: calc(100% + 24px);

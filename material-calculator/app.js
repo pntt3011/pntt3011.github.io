@@ -1,5 +1,5 @@
 import initWasm from '../shared/lib/pkg/steel_cutting_wasm.js';
-import { buildViewModel } from './viewmodel.js';
+import { buildViewModel, computeOptimalMaterialPlan } from './viewmodel.js';
 import * as Render from './view.js';
 
 const state = {
@@ -143,6 +143,7 @@ async function handleFile(file) {
 function runCalculation() {
     if (!state.parsedCache) return;
 
+    state.optimizationId = (state.optimizationId ?? 0) + 1;
     state.viewModel = buildViewModel(state.parsedCache, state.productConfigs);
 
     Render.renderProducts(state.viewModel.products, {
@@ -157,8 +158,34 @@ function runCalculation() {
     });
 
     Render.renderResults(state.viewModel, { onExportEnabled: setExportEnabled });
-
     elements.calculateButton.disabled = false;
+
+    scheduleOptimization(state.optimizationId);
+}
+
+function scheduleOptimization(id) {
+    const materials = state.viewModel?.materials;
+    if (!materials?.length) return;
+
+    const optimizedPlans = new Array(materials.length).fill(null);
+    let index = 0;
+
+    function step() {
+        // Abort if a newer calculation has started.
+        if (id !== state.optimizationId) return;
+
+        if (index >= materials.length) {
+            state.viewModel = { ...state.viewModel, optimizedPlans };
+            Render.refreshCuttingSection(state.viewModel);
+            return;
+        }
+
+        optimizedPlans[index] = computeOptimalMaterialPlan(materials[index]);
+        index++;
+        setTimeout(step, 0);
+    }
+
+    setTimeout(step, 0);
 }
 
 // ── Excel export ───────────────────────────────────────────────────────────────
