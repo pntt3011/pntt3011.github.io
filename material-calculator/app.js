@@ -6,6 +6,7 @@ const state = {
     wasmReady: false,
     file: null,
     workbook: null,
+    parsedCache: null,    // raw per-unit data from one-time parse
     validation: [],
     materials: [],
     plans: [],
@@ -112,6 +113,7 @@ async function handleFile(file) {
 
     state.file = file;
     state.workbook = null;
+    state.parsedCache = null;
     state.materials = [];
     state.plans = [];
     state.validation = [];
@@ -119,6 +121,8 @@ async function handleFile(file) {
     state.productConfigs = {};
     state.powderCoating = [];
     setExportEnabled(false);
+    elements.productList.innerHTML = "";
+    elements.productCount.textContent = "";
     elements.productListSection.hidden = true;
     elements.calculateButton.disabled = true;
     renderEmptyState("Đang đọc workbook", "Hệ thống đang gom dữ liệu BOM.");
@@ -127,6 +131,16 @@ async function handleFile(file) {
         if (!window.XLSX) throw new Error("SheetJS XLSX is not available.");
         const buffer = await file.arrayBuffer();
         state.workbook = window.XLSX.read(buffer, { type: 'array', cellDates: false });
+
+        // Parse once — cache raw per-unit data
+        state.parsedCache = window.BomParser.parseWorkbook(state.workbook, { includeValidation: true });
+        state.validation = state.parsedCache.validation ?? [];
+        state.order_name = state.parsedCache.order_name ?? null;
+
+        // One config entry per sheet (sheetName is the unique key)
+        for (const sheet of state.parsedCache.sheets) {
+            state.productConfigs[sheet.sheetName] = { qty: sheet.parsedQty ?? 0, enabled: true };
+        }
 
         runCalculation();
     } catch (error) {
@@ -137,39 +151,77 @@ async function handleFile(file) {
     }
 }
 
-function buildSheetQty() {
-    const sheetQty = {};
-    for (const [sheetName, cfg] of Object.entries(state.productConfigs)) {
-        sheetQty[sheetName] = cfg.enabled ? cfg.qty : 0;
-    }
-    return sheetQty;
-}
-
 function runCalculation() {
-    if (!state.workbook) return;
+    if (!state.parsedCache) return;
 
-    const sheetQty = buildSheetQty();
-    const hasOverrides = Object.keys(sheetQty).length > 0;
+    const allGrouped = new Map();
+    const products = [];
+    const powderCoatingMap = new Map();
 
-    const parsed = window.BomParser.parseWorkbook(state.workbook, {
-        sheetQty: hasOverrides ? sheetQty : undefined,
-        includeValidation: true,
-    });
+    for (const sheet of state.parsedCache.sheets) {
+        const cfg = state.productConfigs[sheet.sheetName];
+        const currentQty = cfg ? cfg.qty : (sheet.parsedQty ?? 0);
+        const enabled = cfg ? cfg.enabled : true;
 
-    state.validation = Array.isArray(parsed.validation) ? parsed.validation : [];
-    state.order_name = parsed?.order_name ?? null;
-    state.products = Array.isArray(parsed.products) ? parsed.products : [];
-    state.powderCoating = Array.isArray(parsed.powder_coating) ? parsed.powder_coating : [];
-    state.materials = sortMaterials(Array.isArray(parsed.steel_material) ? parsed.steel_material : []);
-    state.plans = state.materials.map((material) => computeMaterialPlan(material));
+        products.push({
+            sheetName: sheet.sheetName,
+            code: sheet.code,
+            name: sheet.name,
+            qty: currentQty,
+            parsedQty: sheet.parsedQty,
+            manufacturedWeight: sheet.weightPerUnit,
+            manufacturedArea: sheet.areaPerUnit,
+            manufacturedVolume: sheet.volumePerUnit,
+        });
 
-    // Sync productConfigs from parsed products (only on first load or new file)
-    if (!hasOverrides && state.products.length > 0) {
-        state.productConfigs = {};
-        for (const p of state.products) {
-            state.productConfigs[p.sheetName] = { qty: p.qty, enabled: true };
+        if (!enabled || !currentQty) continue;
+
+        // Scale per-unit material quantities by current qty and merge
+        for (const [key, matData] of sheet.materials) {
+            if (!allGrouped.has(key)) {
+                allGrouped.set(key, {
+                    box_width: matData.box_width, box_length: matData.box_length,
+                    type: matData.type, shape: matData.shape, thickness: matData.thickness,
+                    usageMap: new Map()
+                });
+            }
+            const grouped = allGrouped.get(key);
+            for (const [length, { qtyPerUnit, productCodes }] of matData.usages) {
+                const totalQty = Math.round(qtyPerUnit * currentQty);
+                if (totalQty <= 0) continue;
+                const existing = grouped.usageMap.get(length);
+                if (!existing) {
+                    grouped.usageMap.set(length, { qty: totalQty, productCodes: new Set(productCodes) });
+                } else {
+                    existing.qty += totalQty;
+                    for (const c of productCodes) existing.productCodes.add(c);
+                }
+            }
+        }
+
+        // Scale per-unit powder coating area
+        for (const { code, areaPerUnit } of sheet.powderCoating) {
+            powderCoatingMap.set(code, (powderCoatingMap.get(code) || 0) + areaPerUnit * currentQty);
         }
     }
+
+    // Flatten grouped map to final material array
+    const steelMaterials = Array.from(allGrouped.values()).map(item => ({
+        box_width: item.box_width, box_length: item.box_length,
+        type: item.type, shape: item.shape, thickness: item.thickness,
+        usage: Array.from(item.usageMap.entries())
+            .sort((a, b) => Number(a[0]) - Number(b[0]))
+            .map(([length, { qty, productCodes }]) => ({
+                length, qty, productCodes: Array.from(productCodes)
+            }))
+    }));
+
+    state.products = products;
+    state.powderCoating = Array.from(powderCoatingMap.entries())
+        .map(([code, area]) => ({ code, area }))
+        .sort((a, b) => a.code.localeCompare(b.code));
+    state.materials = sortMaterials(steelMaterials);
+    state.plans = state.materials.map(m => computeMaterialPlan(m));
 
     renderProducts(state.products);
     renderPlans(state.plans);
@@ -245,50 +297,31 @@ function computeMaterialPlan(material) {
 
 // ── Product list ──────────────────────────────────────────────────────────────
 
-function groupProductsByCode(products) {
-    const groups = new Map();
-    for (const p of products) {
-        if (!groups.has(p.code)) groups.set(p.code, []);
-        groups.get(p.code).push(p);
-    }
-    return groups;
-}
-
 function renderProducts(products) {
     if (!products.length) {
+        elements.productList.innerHTML = "";
         elements.productListSection.hidden = true;
         return;
     }
 
     elements.productListSection.hidden = false;
-
-    const groups = groupProductsByCode(products);
-    elements.productCount.textContent = `${groups.size} sản phẩm`;
+    elements.productCount.textContent = `${products.length} sản phẩm`;
     elements.productList.innerHTML = "";
 
     const fragment = document.createDocumentFragment();
 
-    for (const [code, group] of groups) {
-        const firstCfg = state.productConfigs[group[0].sheetName] || { qty: group[0].qty, enabled: true };
-        const totalQty = group.reduce((sum, p) => {
-            const cfg = state.productConfigs[p.sheetName];
-            return sum + (cfg ? cfg.qty : p.qty);
-        }, 0);
+    for (const product of products) {
+        const cfg = state.productConfigs[product.sheetName] || { qty: product.qty ?? 0, enabled: true };
 
         const item = document.createElement("div");
-        item.className = "product-item" + (firstCfg.enabled ? "" : " product-item--disabled");
+        item.className = "product-item" + (cfg.enabled ? "" : " product-item--disabled");
 
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
         checkbox.className = "product-checkbox";
-        checkbox.checked = firstCfg.enabled;
+        checkbox.checked = cfg.enabled;
         checkbox.addEventListener("change", () => {
-            for (const p of group) {
-                state.productConfigs[p.sheetName] = {
-                    ...state.productConfigs[p.sheetName],
-                    enabled: checkbox.checked,
-                };
-            }
+            state.productConfigs[product.sheetName] = { ...cfg, enabled: checkbox.checked };
             item.classList.toggle("product-item--disabled", !checkbox.checked);
         });
 
@@ -297,11 +330,11 @@ function renderProducts(products) {
 
         const nameEl = document.createElement("div");
         nameEl.className = "product-name";
-        nameEl.textContent = group[0].name;
+        nameEl.textContent = product.name;
 
         const metaEl = document.createElement("div");
         metaEl.className = "product-meta";
-        metaEl.textContent = code;
+        metaEl.textContent = product.code;
 
         info.appendChild(nameEl);
         info.appendChild(metaEl);
@@ -318,16 +351,11 @@ function renderProducts(products) {
         qtyInput.className = "product-qty-input";
         qtyInput.min = "0";
         qtyInput.step = "1";
-        qtyInput.value = totalQty;
+        qtyInput.value = cfg.qty;
         qtyInput.addEventListener("change", () => {
             const newQty = Math.max(0, Math.trunc(Number(qtyInput.value) || 0));
             qtyInput.value = newQty;
-            for (const p of group) {
-                state.productConfigs[p.sheetName] = {
-                    ...state.productConfigs[p.sheetName],
-                    qty: newQty,
-                };
-            }
+            state.productConfigs[product.sheetName] = { ...cfg, qty: newQty };
         });
 
         qtyControl.appendChild(qtyLabel);
@@ -463,7 +491,12 @@ function renderPlans(plans) {
 
             const bodyEl = document.createElement("div");
             bodyEl.className = "material-body";
-            bodyEl.appendChild(plan.error ? buildErrorState(plan.error) : buildPatternBlock(plan));
+            if (plan.error) {
+                bodyEl.appendChild(buildErrorState(plan.error));
+            } else {
+                bodyEl.appendChild(buildSourceBlock(plan));
+                bodyEl.appendChild(buildPatternBlock(plan));
+            }
             detail.appendChild(bodyEl);
 
             body.appendChild(detail);
@@ -533,6 +566,35 @@ function buildSummaryBadges(plan, isAlert) {
     }
 
     return badges;
+}
+
+// ── Source block ──────────────────────────────────────────────────────────────
+
+function buildSourceBlock(plan) {
+    const block = document.createElement("section");
+    block.className = "source-block";
+
+    const title = document.createElement("div");
+    title.className = "block-title";
+    title.textContent = "Số lượng cần cắt";
+
+    const chips = document.createElement("div");
+    chips.className = "chip-row";
+
+    for (const usage of plan.material.usage || []) {
+        const length = numberOrNull(usage.length);
+        const qty = numberOrNull(usage.qty);
+        if (length == null || qty == null || qty <= 0) continue;
+
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = `${formatNumber(length)} mm × ${formatNumber(qty)}`;
+        chips.appendChild(chip);
+    }
+
+    block.appendChild(title);
+    block.appendChild(chips);
+    return block;
 }
 
 // ── Pattern block ─────────────────────────────────────────────────────────────
@@ -703,13 +765,10 @@ function exportExcel() {
     summaryRows.push(["DANH SÁCH SẢN PHẨM"]);
     summaryTableHeaderRows.push(summaryRows.length);
     summaryRows.push(["Tên sản phẩm", "Mã", "Số lượng"]);
-    const productGroups = groupProductsByCode(state.products);
-    for (const [code, group] of productGroups) {
-        const totalQty = group.reduce((sum, p) => {
-            const cfg = state.productConfigs[p.sheetName];
-            return sum + (cfg ? cfg.qty : p.qty);
-        }, 0);
-        summaryRows.push([group[0].name, code, totalQty]);
+    for (const p of state.products) {
+        const cfg = state.productConfigs[p.sheetName];
+        const qty = cfg ? cfg.qty : p.qty;
+        summaryRows.push([p.name, p.code, qty]);
     }
     summaryRows.push([]);
 
@@ -787,7 +846,23 @@ function exportExcel() {
         currentRow++;
 
         detailHeaderRows.push(currentRow);
-        detailRows.push(["Vật liệu", "Mã sản phẩm", "Số lượng", ...materialLengths.map(l => `${l} mm`), "Dư thừa (mm)", "Dài phôi (mm)"]);
+        detailRows.push(["Vật liệu", "Mã sản phẩm", "Số lượng", ...materialLengths.map(l => `${l} mm`), "Dư thừa (mm)", "Dài vật tư (mm)"]);
+        currentRow++;
+
+        // Required qty per length row
+        const lengthToQty = new Map();
+        for (const usage of plan.material.usage || []) {
+            lengthToQty.set(Math.trunc(Number(usage.length)), Number(usage.qty) || 0);
+        }
+        const requiredRow = [
+            materialLabel(plan.material),
+            "Số lượng cần cắt",
+            plan.requiredTotal,
+            ...materialLengths.map(l => lengthToQty.get(l) || 0),
+            "",
+            "",
+        ];
+        detailRows.push(requiredRow);
         currentRow++;
 
         plan.result.patterns.forEach((pattern) => {

@@ -256,7 +256,7 @@ function renderResults(result, stockLength = 0) {
                     </svg>
                 </div>
                 <h4>Kế hoạch cắt phôi tối ưu</h4>
-                <p>Nhập thông tin chiều dài phôi và các chi tiết ở cột bên trái, sau đó nhấn <strong>"Tính Toán"</strong> để xem sơ đồ tối ưu hóa.</p>
+                <p>Nhập thông tin chiều dài vật tư và các chi tiết ở cột bên trái, sau đó nhấn <strong>"Tính Toán"</strong> để xem sơ đồ tối ưu hóa.</p>
             </div>
         `;
         return;
@@ -379,7 +379,7 @@ function exportToExcel(result, stockLength) {
     result.lengths.forEach(len => {
         detailHeaders.push(`${len} mm`);
     });
-    detailHeaders.push("Dư thừa (mm)", "Chiều dài phôi gốc (mm)", "Số lượng phôi");
+    detailHeaders.push("Dư thừa (mm)", "Dài vật tư (mm)", "Số lượng thanh vật tư");
     rows.push(detailHeaders);
 
     // Data rows
@@ -489,8 +489,8 @@ function exportToExcel(result, stockLength) {
     });
     colWidths.push(
         { wch: 18 }, // Dư thừa
-        { wch: 25 }, // Chiều dài phôi gốc
-        { wch: 20 }  // Số lượng phôi
+        { wch: 25 }, // Chiều dài vật tư
+        { wch: 20 }  // Số lượng thanh vật tư
     );
     ws["!cols"] = colWidths;
 

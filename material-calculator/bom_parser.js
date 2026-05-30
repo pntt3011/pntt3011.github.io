@@ -145,11 +145,12 @@
             .replace(/\s+/g, " ");
     }
 
-    // Read product info directly from the sheet object using Excel cell addresses (1-indexed)
-    function extractProductInfo(sheet, sheetName) {
+    // Returns null if G6 (name) or G7 (code) are missing — sheet is invalid without them.
+    function extractProductInfo(sheet) {
         const name = cleanText(sheet['G6']?.v ?? '');
         const code = cleanText(sheet['G7']?.v ?? '');
-        return { name: name || sheetName, code: code || sheetName };
+        if (!name || !code) return null;
+        return { name, code };
     }
 
     // Find "Cộng - TOTAL" in column B after "PHẦN SẮT" marker; read weight (col K=10), area (col L=11)
@@ -180,7 +181,8 @@
     // Underscore before ( is optional; D may appear with or without the Vietnamese stroke
     const COLOR_CODE_RE = /\(T[DĐdđ]\.([^)]+)\)/;
 
-    function extractPowderCoating(rows, productQty = 1) {
+    // Returns per-unit area per color code — multiply by qty in the app at calculate time.
+    function extractPowderCoating(rows) {
         const result = new Map();
         let currentCode = null;
 
@@ -200,26 +202,23 @@
             if (currentCode !== null) {
                 const area = toNumber(cellAt(rows, r, 11));
                 if (area !== null && area > 0) {
-                    result.set(currentCode, result.get(currentCode) + area * productQty);
+                    result.set(currentCode, result.get(currentCode) + area);
                 }
             }
         }
 
-        return Array.from(result.entries()).map(([code, area]) => ({ code, area }));
+        return Array.from(result.entries()).map(([code, areaPerUnit]) => ({ code, areaPerUnit }));
     }
 
-    function parseBomSheet(rows, sheetName, options = {}) {
-        const validation = validateBomSheet(rows, sheetName);
-        if (!validation.valid) return new Map();
-
-        const productQty = options.productQtyOverride ?? validation.productQty;
-        const productCode = options.productCode ?? sheetName;
-        const cols = getColumns(rows, validation.headerRow);
+    // Stores raw per-unit qty (qtyPerProduct) — no productQty multiplication.
+    // Merging and scaling happen in the app at calculate time.
+    function parseBomSheet(rows, headerRow, options = {}) {
+        const productCode = options.productCode ?? 'unknown';
+        const cols = getColumns(rows, headerRow);
         const grouped = new Map();
-
         let emptyRun = 0;
 
-        for (let r = validation.headerRow + 1; r < rows.length; r++) {
+        for (let r = headerRow + 1; r < rows.length; r++) {
             const qtyPerProduct = toNumber(cellAt(rows, r, cols.qty));
             const boxWidth = toNumber(cellAt(rows, r, cols.box_width));
             const boxLength = toNumber(cellAt(rows, r, cols.box_length));
@@ -229,80 +228,34 @@
             const shape = cleanText(cellAt(rows, r, cols.shape));
 
             if (!qtyPerProduct && !boxWidth && !boxLength && !length && !thickness && !type && !shape) {
-                emptyRun++;
-                if (emptyRun >= 10) break;
+                if (++emptyRun >= 10) break;
                 continue;
             }
-
             emptyRun = 0;
 
             if (!qtyPerProduct || !length || !type || !shape) continue;
             if (boxWidth === null || thickness === null) continue;
-
-            // Skip flat sheets (la dẹt)
             if (normalize(shape) === 'la det') continue;
+            if (qtyPerProduct <= 0) continue;
 
             const material = { box_width: boxWidth, box_length: boxLength, type, shape, thickness };
             const key = makeKey(material);
-            const totalQty = Math.round(qtyPerProduct * productQty);
 
             if (!grouped.has(key)) {
-                grouped.set(key, { ...material, usageMap: new Map() });
+                grouped.set(key, { ...material, usages: new Map() });
             }
 
             const item = grouped.get(key);
-            const existing = item.usageMap.get(length);
+            const existing = item.usages.get(length);
             if (!existing) {
-                item.usageMap.set(length, { qty: totalQty, productCodes: new Set([productCode]) });
+                item.usages.set(length, { qtyPerUnit: qtyPerProduct, productCodes: new Set([productCode]) });
             } else {
-                existing.qty += totalQty;
+                existing.qtyPerUnit += qtyPerProduct;
                 existing.productCodes.add(productCode);
             }
         }
 
         return grouped;
-    }
-
-    function mergeGrouped(target, source) {
-        for (const [key, item] of source.entries()) {
-            if (!target.has(key)) {
-                const cloned = { ...item, usageMap: new Map() };
-                for (const [len, data] of item.usageMap.entries()) {
-                    cloned.usageMap.set(len, { qty: data.qty, productCodes: new Set(data.productCodes) });
-                }
-                target.set(key, cloned);
-                continue;
-            }
-
-            const existing = target.get(key);
-            for (const [length, data] of item.usageMap.entries()) {
-                const existingData = existing.usageMap.get(length);
-                if (!existingData) {
-                    existing.usageMap.set(length, { qty: data.qty, productCodes: new Set(data.productCodes) });
-                } else {
-                    existingData.qty += data.qty;
-                    for (const code of data.productCodes) existingData.productCodes.add(code);
-                }
-            }
-        }
-    }
-
-    function finalize(grouped) {
-        return {
-            steel_material: Array.from(grouped.values()).map(item => ({
-                box_width: item.box_width,
-                box_length: item.box_length,
-                type: item.type,
-                shape: item.shape,
-                thickness: item.thickness,
-                usage: Array.from(item.usageMap.entries())
-                    .sort((a, b) => Number(a[0]) - Number(b[0]))
-                    .map(([length, { qty, productCodes }]) => ({
-                        length, qty,
-                        productCodes: Array.from(productCodes)
-                    }))
-            }))
-        };
     }
 
     function extractOrderName(workbook) {
@@ -331,69 +284,44 @@
         return null;
     }
 
+    // Parses the workbook ONCE and returns raw per-unit data per sheet.
+    // The app applies qty scaling and merging at calculate time — no re-parsing needed.
     function parseWorkbook(workbook, options = {}) {
-        const allGrouped = new Map();
+        const sheets = [];
         const validation = [];
-        const products = [];
-        const powderCoatingMap = new Map();
 
         for (const sheetName of workbook.SheetNames) {
             const sheet = workbook.Sheets[sheetName];
             const rows = XLSX.utils.sheet_to_json(sheet, {
-                header: 1,
-                raw: true,
-                defval: null,
-                blankrows: false
+                header: 1, raw: true, defval: null, blankrows: false
             });
 
             const v = validateBomSheet(rows, sheetName);
             validation.push(v);
 
-            if (!v.valid) continue;
+            if (v.headerRow < 0 || v.dataRowCount === 0) continue;
 
-            const productInfo = extractProductInfo(sheet, sheetName);
+            const productInfo = extractProductInfo(sheet);
+            if (!productInfo) continue;
             const summary = extractManufacturedSummary(rows);
-            const qty = options.sheetQty?.[sheetName] ?? v.productQty;
-            const powderCoating = extractPowderCoating(rows, qty);
 
-            products.push({
+            sheets.push({
                 sheetName,
                 code: productInfo.code,
                 name: productInfo.name,
-                qty,
                 parsedQty: v.productQty,
-                manufacturedWeight: summary?.weight || 0,
-                manufacturedArea: summary?.area || 0,
-                manufacturedVolume: toNumber(sheet['L15']?.v) || 0,
+                weightPerUnit: summary?.weight || 0,
+                areaPerUnit: summary?.area || 0,
+                volumePerUnit: toNumber(sheet['L15']?.v) || 0,
+                materials: parseBomSheet(rows, v.headerRow, { productCode: productInfo.code }),
+                powderCoating: extractPowderCoating(rows),
             });
-
-            for (const { code, area } of powderCoating) {
-                powderCoatingMap.set(code, (powderCoatingMap.get(code) || 0) + area);
-            }
-
-            const grouped = parseBomSheet(rows, sheetName, {
-                productQtyOverride: options.sheetQty?.[sheetName],
-                productCode: productInfo.code
-            });
-
-            mergeGrouped(allGrouped, grouped);
         }
 
-        const result = finalize(allGrouped);
-        result.products = products;
-        result.powder_coating = Array.from(powderCoatingMap.entries())
-            .map(([code, area]) => ({ code, area }))
-            .sort((a, b) => a.code.localeCompare(b.code));
-
-        try {
-            const orderName = extractOrderName(workbook);
-            result.order_name = orderName ?? null;
-        } catch (e) {
-            result.order_name = null;
-        }
-
+        const result = { sheets };
+        result.order_name = null;
+        try { result.order_name = extractOrderName(workbook) ?? null; } catch (_) { }
         if (options.includeValidation) result.validation = validation;
-
         return result;
     }
 
