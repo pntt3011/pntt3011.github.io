@@ -1,5 +1,7 @@
 import initWasm, { compute_cutting_plan_numeric } from "../shared/lib/pkg/steel_cutting_wasm.js";
 
+const { normalize } = window.BomParser;
+
 const WASTE_ALERT_PCT = 1.0;
 
 const state = {
@@ -178,6 +180,7 @@ function runCalculation() {
 
         // Scale per-unit material quantities by current qty and merge
         for (const [key, matData] of sheet.materials) {
+            if (normalize(matData.shape) === "la det") continue;
             if (!allGrouped.has(key)) {
                 allGrouped.set(key, {
                     box_width: matData.box_width, box_length: matData.box_length,
@@ -258,7 +261,7 @@ function computeMaterialPlan(material) {
     }
 
     const STOCK_LENGTH = 5950;
-    const WASTE_FRACTION = 0.8;
+    const WASTE_FRACTION = 0.99;
     const DEFAULT_MAX_PATTERN_WASTE = 600;
     const maxInputLength = lengths.length ? Math.max(...lengths.map(Number)) : 0;
     const computedMaxPatternWaste = Math.ceil(WASTE_FRACTION * maxInputLength);
@@ -491,10 +494,10 @@ function renderPlans(plans) {
 
             const bodyEl = document.createElement("div");
             bodyEl.className = "material-body";
+            bodyEl.appendChild(buildSourceBlock(plan));
             if (plan.error) {
                 bodyEl.appendChild(buildErrorState(plan.error));
             } else {
-                bodyEl.appendChild(buildSourceBlock(plan));
                 bodyEl.appendChild(buildPatternBlock(plan));
             }
             detail.appendChild(bodyEl);

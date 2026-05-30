@@ -129,8 +129,8 @@
         return JSON.stringify([
             m.box_width,
             m.box_length,
-            m.type,
-            m.shape,
+            normalize(m.type),
+            normalize(m.shape),
             m.thickness
         ]);
     }
@@ -235,7 +235,6 @@
 
             if (!qtyPerProduct || !length || !type || !shape) continue;
             if (boxWidth === null || thickness === null) continue;
-            if (normalize(shape) === 'la det') continue;
             if (qtyPerProduct <= 0) continue;
 
             const material = { box_width: boxWidth, box_length: boxLength, type, shape, thickness };
@@ -338,7 +337,8 @@
         parseBomFile,
         parseWorkbook,
         validateBomSheet,
-        extractOrderName
+        extractOrderName,
+        normalize
     };
 
     global.bom_parse = parseBomFile;
