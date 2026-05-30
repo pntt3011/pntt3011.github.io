@@ -192,9 +192,10 @@ function exportExcel() {
 
     summaryTitleRows.push(summaryRows.length);
     summaryRows.push(['THÔNG TIN SẢN XUẤT']);
-    summaryRows.push(['Trọng lượng SX', Number(vm.totalWeight.toFixed(2)), 'kg']);
-    summaryRows.push(['Diện tích SX', Number(vm.totalArea.toFixed(2)), 'm²']);
-    summaryRows.push(['Thể tích SX', Number(vm.totalVolume.toFixed(4)), 'm³']);
+    summaryRows.push(['Steel weight', Number(vm.steelWeight.toFixed(2)), 'kg']);
+    summaryRows.push(['Steel area', Number(vm.steelArea.toFixed(2)), 'm²']);
+    summaryRows.push(['Wood area', Number(vm.woodArea.toFixed(2)), 'm²']);
+    summaryRows.push(['Wood volume', Number(vm.woodVolume.toFixed(4)), 'm³']);
     summaryRows.push([]);
 
     summaryTitleRows.push(summaryRows.length);

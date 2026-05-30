@@ -88,7 +88,7 @@ function buildProductItem(product, { onToggle, onQtyChange }) {
 // ── Results panel ──────────────────────────────────────────────────────────────
 
 export function renderResults(viewModel, { onExportEnabled }) {
-    const { order_name, plans, powderCoating, totalWeight, totalArea, totalVolume } = viewModel;
+    const { order_name, plans, powderCoating, steelWeight, steelArea, woodArea, woodVolume } = viewModel;
 
     if (el.resultsPanelTitle) {
         el.resultsPanelTitle.textContent = order_name
@@ -99,22 +99,23 @@ export function renderResults(viewModel, { onExportEnabled }) {
     el.resultsList.innerHTML = '';
     const fragment = document.createDocumentFragment();
 
-    fragment.appendChild(buildStatCardsRow(totalWeight, totalArea, totalVolume));
-    fragment.appendChild(makeCollapsible('Kế hoạch cắt phôi', body => buildCuttingPlansContent(body, plans), false));
-    fragment.appendChild(makeCollapsible('Yêu cầu sơn', body => { body.appendChild(buildPowderCoatingContent(powderCoating)); }, false));
+    fragment.appendChild(buildStatCardsRow(steelWeight, steelArea, woodArea, woodVolume));
+    fragment.appendChild(makeCollapsible('Kế hoạch cắt sắt', body => buildCuttingPlansContent(body, plans), false));
+    fragment.appendChild(makeCollapsible('Yêu cầu sơn sắt', body => { body.appendChild(buildPowderCoatingContent(powderCoating)); }, false));
 
     el.resultsList.appendChild(fragment);
     onExportEnabled(plans.length > 0);
 }
 
-function buildStatCardsRow(totalWeight, totalArea, totalVolume) {
+function buildStatCardsRow(steelWeight, steelArea, woodArea, woodVolume) {
     const row = document.createElement('div');
     row.className = 'summary-stats';
 
     const cards = [
-        { label: 'Trọng lượng SX', value: areaFormatter.format(totalWeight), unit: 'kg' },
-        { label: 'Diện tích SX', value: areaFormatter.format(totalArea), unit: 'm²' },
-        { label: 'Thể tích SX', value: areaFormatter.format(totalVolume), unit: 'm³' },
+        { label: 'Trọng lượng sắt', value: areaFormatter.format(steelWeight), unit: 'kg' },
+        { label: 'Diện tích sắt', value: areaFormatter.format(steelArea), unit: 'm²' },
+        { label: 'Diện tích gỗ', value: areaFormatter.format(woodArea), unit: 'm²' },
+        { label: 'Thể tích gỗ', value: areaFormatter.format(woodVolume), unit: 'm³' },
     ];
 
     for (const card of cards) {
