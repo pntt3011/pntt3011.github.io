@@ -100,7 +100,14 @@ export function renderResults(viewModel, { onExportEnabled }) {
     const fragment = document.createDocumentFragment();
 
     fragment.appendChild(buildStatCardsRow(steelWeight, steelArea, woodArea, woodVolume));
-    fragment.appendChild(makeCollapsible('Kế hoạch cắt sắt', body => buildCuttingPlansContent(body, plans), false, buildCuttingWasteBadge(plans)));
+    const optimizedPlans = plans; // placeholder — wire real algorithm here later
+    const { badgeEl, setActiveView, wire } = buildCuttingDualBadge(plans, optimizedPlans);
+    fragment.appendChild(makeCollapsible(
+        'Kế hoạch cắt sắt',
+        body => wire(buildCuttingPlansContent(body, plans, optimizedPlans, setActiveView)),
+        false,
+        badgeEl,
+    ));
     fragment.appendChild(makeCollapsible('Yêu cầu sơn sắt', body => { body.appendChild(buildPowderCoatingContent(powderCoating)); }, false));
     fragment.appendChild(makeCollapsible('Yêu cầu sơn gỗ', body => { body.appendChild(buildPowderCoatingContent(woodPainting)); }, false));
 
@@ -140,15 +147,67 @@ function buildStatCardsRow(steelWeight, steelArea, woodArea, woodVolume) {
     return row;
 }
 
-function buildCuttingWasteBadge(plans) {
+function buildCuttingDualBadge(plans, optimizedPlans) {
+    const container = document.createElement('div');
+    container.className = 'collapsible-waste-badges';
+
+    const slider = document.createElement('div');
+    slider.className = 'collapsible-waste-badge-slider';
+    container.appendChild(slider);
+
+    const beforeBadge = makeSingleWasteBadge(plans, 'Gốc');
+    const afterBadge = makeSingleWasteBadge(optimizedPlans, 'Tối ưu');
+    if (afterBadge) afterBadge.classList.add('collapsible-waste-badge--optimized', 'collapsible-waste-badge--inactive');
+
+    if (beforeBadge) container.appendChild(beforeBadge);
+    if (afterBadge) container.appendChild(afterBadge);
+
+    if (container.children.length === 1) return { badgeEl: null, setActiveView: () => {}, wire: fn => fn };
+
+    const group = document.createElement('div');
+    group.className = 'collapsible-waste-badge-group';
+    const label = document.createElement('span');
+    label.className = 'collapsible-waste-label';
+    label.textContent = 'Hao hụt';
+    group.appendChild(label);
+    group.appendChild(container);
+
+    function positionSlider(badge) {
+        slider.style.width = badge.offsetWidth + 'px';
+        slider.style.transform = `translateX(${badge.offsetLeft - 3}px)`;
+    }
+
+    function setActiveView(view) {
+        const isAfter = view === 'after';
+        beforeBadge?.classList.toggle('collapsible-waste-badge--inactive', isAfter);
+        afterBadge?.classList.toggle('collapsible-waste-badge--inactive', !isAfter);
+        slider.classList.toggle('collapsible-waste-badge-slider--optimized', isAfter);
+        positionSlider(isAfter ? afterBadge : beforeBadge);
+    }
+
+    function wire(switchView) {
+        beforeBadge?.classList.add('collapsible-waste-badge--clickable');
+        afterBadge?.classList.add('collapsible-waste-badge--clickable');
+        beforeBadge?.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); switchView('before'); });
+        afterBadge?.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); switchView('after'); });
+
+        requestAnimationFrame(() => {
+            slider.style.transition = 'none';
+            positionSlider(beforeBadge);
+            requestAnimationFrame(() => { slider.style.transition = ''; });
+        });
+    }
+
+    return { badgeEl: group, setActiveView, wire };
+}
+
+function makeSingleWasteBadge(plans, label) {
     const { calcSteelWeightPerUnit } = window.BomParser;
     let totalWasteKg = 0;
     let totalStockKg = 0;
 
     for (const plan of plans) {
         if (!plan.result) continue;
-
-        // Weight of 1 mm of this profile (kg/mm), used to convert lengths → weights
         const kgPerMm = calcSteelWeightPerUnit({
             box_width:  plan.material.box_width,
             box_height: plan.material.box_length,
@@ -157,7 +216,6 @@ function buildCuttingWasteBadge(plans) {
             shape:      plan.material.shape,
             type:       plan.material.type,
         });
-
         totalWasteKg += kgPerMm * Number(plan.result.total_waste || 0);
         totalStockKg += kgPerMm * Number(plan.result.stock_qty || 0) * Number(plan.input.stock_length || 0);
     }
@@ -167,7 +225,7 @@ function buildCuttingWasteBadge(plans) {
     const wastePct = (totalWasteKg / totalStockKg) * 100;
     const badge = document.createElement('span');
     badge.className = 'collapsible-waste-badge';
-    badge.textContent = `Hao hụt ${areaFormatter.format(totalWasteKg)} kg (${wastePct.toFixed(2)}%)`;
+    badge.textContent = `${label}: ${areaFormatter.format(totalWasteKg)} kg (${wastePct.toFixed(2)}%)`;
     return badge;
 }
 
@@ -199,15 +257,33 @@ function makeCollapsible(titleText, buildBody, defaultOpen = true, badge = null)
     return details;
 }
 
-function buildCuttingPlansContent(body, plans) {
+function buildCuttingPlansContent(body, plans, optimizedPlans, setActiveView) {
     if (!plans.length) {
         const empty = document.createElement('p');
         empty.className = 'results-section-empty';
         empty.textContent = 'Không tìm thấy nhóm vật liệu nào đủ dữ liệu.';
         body.appendChild(empty);
-        return;
+        return view => {};
     }
 
+    const beforeSection = document.createElement('div');
+    buildCuttingPlanList(beforeSection, plans);
+    body.appendChild(beforeSection);
+
+    const afterSection = document.createElement('div');
+    afterSection.hidden = true;
+    buildCuttingPlanList(afterSection, optimizedPlans);
+    body.appendChild(afterSection);
+
+    return function switchView(view) {
+        beforeSection.hidden = view === 'after';
+        afterSection.hidden = view === 'before';
+        setActiveView(view);
+    };
+}
+
+
+function buildCuttingPlanList(container, plans) {
     const sortedPlans = plans.slice().sort((a, b) =>
         materialLabel(a.material).localeCompare(materialLabel(b.material), 'vi', { sensitivity: 'base' })
     );
@@ -229,10 +305,10 @@ function buildCuttingPlansContent(body, plans) {
         if (plan.error) {
             bodyEl.appendChild(buildErrorBlock(plan.error));
         } else {
-            bodyEl.appendChild(buildPatternBlock(plan));
+            bodyEl.appendChild(buildPatternBlock(plan, isAlert));
         }
         detail.appendChild(bodyEl);
-        body.appendChild(detail);
+        container.appendChild(detail);
     }
 }
 
@@ -312,7 +388,7 @@ function buildSourceBlock(plan) {
     return block;
 }
 
-function buildPatternBlock(plan) {
+function buildPatternBlock(plan, materialIsAlert = false) {
     const block = document.createElement('section');
     block.className = 'pattern-block';
 
@@ -335,7 +411,7 @@ function buildPatternBlock(plan) {
         const patternWastePct = plan.input.stock_length > 0
             ? (pattern.waste / plan.input.stock_length) * 100
             : 0;
-        const patternAlert = patternWastePct >= WASTE_ALERT_PCT;
+        const patternAlert = materialIsAlert && patternWastePct >= WASTE_ALERT_PCT;
 
         const patternCodes = new Set();
         lengths.forEach((length, i) => {
