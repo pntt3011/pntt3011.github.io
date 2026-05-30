@@ -1,16 +1,16 @@
 /* ── Design tokens ── */
 :root {
-  --bg: #f5f4f1;
+  --bg: #f0f4f8;
   --card: #ffffff;
-  --card-border: #e5e2dd;
+  --card-border: #dde3ed;
   --text: #1a1c21;
   --muted: #6b7280;
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-muted: rgba(37, 99, 235, 0.10);
+  --accent: #0a52a1;
+  --accent-hover: #08408a;
+  --accent-muted: rgba(10, 82, 161, 0.10);
   --danger: #dc2626;
-  --shadow-sm: 0 1px 3px rgba(20,15,5,.07), 0 1px 2px rgba(20,15,5,.05);
-  --shadow-md: 0 4px 16px rgba(20,15,5,.08), 0 2px 6px rgba(20,15,5,.05);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+  --shadow-md: 0 4px 16px rgba(0,0,0,.08), 0 2px 6px rgba(0,0,0,.06);
   --radius-sm: 8px;
   --radius-md: 14px;
   --radius-lg: 20px;
