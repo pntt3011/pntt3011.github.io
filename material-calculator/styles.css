@@ -764,4 +764,34 @@ body {
   .dropzone {
     min-height: 180px;
   }
+
+  /* Waste badge group wraps to its own row under the section title */
+  .results-collapsible-header {
+    flex-wrap: wrap;
+  }
+
+  .collapsible-waste-badge-group {
+    margin-left: 0;
+    /* indent aligns badge with title text: toggle icon (14px) + gap (8px) */
+    padding-left: 22px;
+    flex-basis: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .collapsible-waste-badge-group::-webkit-scrollbar {
+    display: none;
+  }
+
+  .collapsible-waste-badge {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+  }
+
+  /* Reduce the oversized touch-target pseudo so it doesn't bleed into row above */
+  .collapsible-waste-badge--clickable::before {
+    top: -8px;
+    bottom: -8px;
+  }
 }
