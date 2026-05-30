@@ -1,6 +1,6 @@
 import initWasm, { compute_cutting_plan_numeric } from "../shared/lib/pkg/steel_cutting_wasm.js";
 
-const WASTE_ALERT_PCT = 1.5;
+const WASTE_ALERT_PCT = 1.0;
 
 const state = {
     wasmReady: false,

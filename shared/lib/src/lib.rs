@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-const MAX_ITEMS: usize = 15;
+const MAX_ITEMS: usize = 50;
 const DEFAULT_MAX_PATTERN_WASTE: u32 = 600;
 const MAX_RESIDUAL_PATTERN_CANDIDATES: usize = 45;
 const MAX_RESIDUAL_FIRST_PATTERN_CANDIDATES: usize = 32;
