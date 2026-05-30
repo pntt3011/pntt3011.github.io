@@ -208,7 +208,7 @@ function exportExcel() {
     const safeOrder = rawOrder
         ? rawOrder.replace(/[^0-9A-Za-z]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '').slice(0, 120)
         : '';
-    const fileName = safeOrder ? `VatTu_${safeOrder}.xlsx` : 'KeHoachCat.xlsx';
+    const fileName = safeOrder ? `VatTu_${safeOrder}.xlsx` : 'VatTu.xlsx';
     const workbook = XLSX.utils.book_new();
     const thinBorder = {
         top: { style: 'thin', color: { rgb: '000000' } },
@@ -292,7 +292,7 @@ function exportExcel() {
     ]);
     for (let i = 0; i < vm.plans.length; i++) {
         const plan = vm.plans[i];
-        const opt  = hasOpt ? vm.optimizedPlans[i] : null;
+        const opt = hasOpt ? vm.optimizedPlans[i] : null;
         summaryRows.push([
             Render.materialLabel(plan.material),
             plan.sourceCount,
