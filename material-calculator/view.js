@@ -165,7 +165,7 @@ function buildCuttingDualBadge(plans, optimizedPlans) {
     if (beforeBadge) container.appendChild(beforeBadge);
     if (afterBadge) container.appendChild(afterBadge);
 
-    if (container.children.length === 1) return { badgeEl: null, setActiveView: () => {}, wire: fn => fn };
+    if (container.children.length === 1) return { badgeEl: null, setActiveView: () => { }, wire: fn => fn };
 
     const group = document.createElement('div');
     group.className = 'collapsible-waste-badge-group';
@@ -212,12 +212,12 @@ function makeSingleWasteBadge(plans, label) {
     for (const plan of plans) {
         if (!plan.result) continue;
         const kgPerMm = calcSteelWeightPerUnit({
-            box_width:  plan.material.box_width,
+            box_width: plan.material.box_width,
             box_height: plan.material.box_length,
-            length:     1,
-            thickness:  plan.material.thickness,
-            shape:      plan.material.shape,
-            type:       plan.material.type,
+            length: 1,
+            thickness: plan.material.thickness,
+            shape: plan.material.shape,
+            type: plan.material.type,
         });
         totalWasteKg += kgPerMm * Number(plan.result.total_waste || 0);
         totalStockKg += kgPerMm * Number(plan.result.stock_qty || 0) * Number(plan.input.stock_length || 0);
@@ -285,7 +285,7 @@ function buildCuttingPlansContent(body, plans, optimizedPlans, setActiveView) {
         empty.className = 'results-section-empty';
         empty.textContent = 'Không tìm thấy nhóm vật liệu nào đủ dữ liệu.';
         body.appendChild(empty);
-        return view => {};
+        return view => { };
     }
 
     const beforeSection = document.createElement('div');
@@ -384,7 +384,7 @@ function buildSummaryBadges(plan, isAlert) {
         badge.appendChild(stockQty);
         badge.appendChild(document.createTextNode(' thanh '));
         badge.appendChild(stockLen);
-        badge.appendChild(document.createTextNode('mm, hao hụt '));
+        badge.appendChild(document.createTextNode(' mm, hao hụt '));
         badge.appendChild(wastePct);
         badge.appendChild(document.createTextNode('%'));
         badges.appendChild(badge);
