@@ -50,6 +50,7 @@
     kind:       'steel',
     name:       string,          // col B
     qty:        number,          // col C
+    cut:        'cnc' | 'laser', // col A contains "CNC" → cnc, else laser
     box_width:  number | null,   // col D  Dia/rộng hộp
     box_height: number | null,   // col E  Dia/dài hộp
     length:     number | null,   // col F  Dài chi tiết
@@ -290,6 +291,7 @@
      * A part row: col B has a value AND col C has a qty.
      *
      * Steel part columns (0-indexed):
+     *   A=0 cut method (contains "CNC" → 'cnc', else 'laser'),
      *   B=1 name, C=2 qty, D=3 box_width, E=4 box_height, F=5 length,
      *   G=6 thickness, H=7 type, J=9 shape
      */
@@ -337,6 +339,7 @@
                     thickness: toNumber(row[6]) ?? null,
                     type: cleanText(row[7]) || null,
                     shape: cleanText(row[9]) || null,
+                    cut: normalize(cleanText(row[0])).includes('cnc') ? 'cnc' : 'laser',
                 });
             }
         }
@@ -458,36 +461,23 @@
     const EXCEL_PI = 3.14;
 
     /**
-     * Returns the density (kg/m³) for a given steel part.
-     * The sheet stores the density explicitly in column I — pass that value
-     * when available.  Falls back to shape-based defaults when the stored
-     * value is missing or zero.
+     * Returns the density (kg/m³) for a given steel part, or null if the
+     * material type is unrecognised (mirrors Excel returning "" for unknown).
      *
-     * Known densities used in the file:
-     *   7850 kg/m³  – carbon steel (sắt đen), all shapes
+     * Mirrors: =IF(J="sắt đen",7850,IF(J="sắt trắng",7850,
+     *              IF(J="sắt kẽm",7900,IF(J="nhôm",2700,""))))
      *
-     * @param {{ shape: string|null, type: string|null, density?: number|null }} part
-     * @returns {number}  density in kg/m³
+     * @param {{ type: string|null }} part
+     * @returns {number|null}
      */
     function getSteelDensity(part) {
-        // If the sheet provided an explicit density (col I), use it directly.
-        if (part.density != null && Number.isFinite(part.density) && part.density > 0)
-            return part.density;
-
-        // Shape / material fallbacks (extend as needed for other alloys)
-        const shape = normalize(part.shape ?? '');
-        const type = normalize(part.type ?? '');
-
-        // Aluminium profiles, if ever added:
-        if (type.includes('nhom') || type.includes('aluminum') || type.includes('aluminium'))
-            return 2700;
-
-        // Stainless steel:
-        if (type.includes('inox') || type.includes('stainless'))
-            return 7900;
-
-        // Default: carbon steel
-        return 7850;
+        switch (normalize(part.type ?? '')) {
+            case 'sat den': return 7850;
+            case 'sat trang': return 7850;
+            case 'sat kem': return 7900;
+            case 'nhom': return 2700;
+            default: return 0; // unknown types treated as zero density (Excel returns "" which is falsy)
+        }
     }
 
     /**

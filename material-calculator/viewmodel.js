@@ -1,5 +1,10 @@
 // viewmodel.js — aggregate model.js output into render-ready data
 
+import { compute_cutting_plan_numeric } from '../shared/lib/pkg/steel_cutting_wasm.js';
+
+const STOCK_LENGTH = 5950;
+const DEFAULT_MAX_PATTERN_WASTE = 600;
+
 export function buildViewModel(parsedResult, productConfigs) {
     const { products = [], order_name = null } = parsedResult;
 
@@ -18,11 +23,16 @@ export function buildViewModel(parsedResult, productConfigs) {
         order_name,
         products: productItems,
         ...aggregateSummary(products, productConfigs),
-        // cutting plan: empty until aggregation is wired
-        materials: [],
-        plans: [],
-        powderCoating: [],
+        powderCoating: aggregateSteelPainting(products, productConfigs),
+        woodPainting: aggregateWoodPainting(products, productConfigs),
+        ...aggregateCuttingPlan(products, productConfigs),
     };
+}
+
+function getEnabledQty(product, productConfigs) {
+    const cfg = productConfigs[product.sheetName];
+    const qty = cfg?.qty ?? product.qty ?? 0;
+    return (cfg?.enabled ?? true) && qty > 0 ? qty : 0;
 }
 
 function aggregateSummary(products, productConfigs) {
@@ -39,9 +49,8 @@ function aggregateSummary(products, productConfigs) {
     let woodVolume = 0;
 
     for (const product of products) {
-        const cfg = productConfigs[product.sheetName];
-        const qty = cfg?.qty ?? product.qty ?? 0;
-        if (!(cfg?.enabled ?? true) || !qty) continue;
+        const qty = getEnabledQty(product, productConfigs);
+        if (!qty) continue;
 
         for (const component of product.components) {
             for (const part of component.parts) {
@@ -58,4 +67,180 @@ function aggregateSummary(products, productConfigs) {
     }
 
     return { steelWeight, steelArea, woodArea, woodVolume };
+}
+
+// Steel: color code from _(TĐ.<code>) on component headers, area per part via calcSteelAreaPerUnit
+function aggregateSteelPainting(products, productConfigs) {
+    const { calcSteelAreaPerUnit } = window.BomParser;
+    const map = new Map();
+
+    for (const product of products) {
+        const qty = getEnabledQty(product, productConfigs);
+        if (!qty) continue;
+
+        for (const component of product.components) {
+            if (component.kind !== 'steel' || !component.paint_color) continue;
+            for (const part of component.parts) {
+                const area = calcSteelAreaPerUnit(part) * part.qty * qty;
+                map.set(component.paint_color, (map.get(component.paint_color) ?? 0) + area);
+            }
+        }
+    }
+
+    return Array.from(map.entries())
+        .map(([code, area]) => ({ code, area }))
+        .sort((a, b) => a.code.localeCompare(b.code));
+}
+
+// Wood: color code from _(S.<code>) on component headers, area per part via calcWoodAreaPerUnit
+
+const WOOD_PAINT_RE = /\(S\.([^)]+)\)/;
+
+function aggregateWoodPainting(products, productConfigs) {
+    const { calcWoodAreaPerUnit } = window.BomParser;
+    const map = new Map();
+
+    for (const product of products) {
+        const qty = getEnabledQty(product, productConfigs);
+        if (!qty) continue;
+
+        for (const component of product.components) {
+            if (component.kind !== 'wood') continue;
+            const match = component.name.match(WOOD_PAINT_RE);
+            if (!match) continue;
+            const code = match[1].trim();
+            for (const part of component.parts) {
+                const area = calcWoodAreaPerUnit(part) * part.qty * qty;
+                map.set(code, (map.get(code) ?? 0) + area);
+            }
+        }
+    }
+
+    return Array.from(map.entries())
+        .map(([code, area]) => ({ code, area }))
+        .sort((a, b) => a.code.localeCompare(b.code));
+}
+
+// ── Cutting plan ───────────────────────────────────────────────────────────────
+
+function aggregateCuttingPlan(products, productConfigs) {
+    const { normalize } = window.BomParser;
+    const grouped = new Map();
+
+    for (const product of products) {
+        const qty = getEnabledQty(product, productConfigs);
+        if (!qty) continue;
+
+        for (const component of product.components) {
+            if (component.kind !== 'steel') continue;
+
+            for (const part of component.parts) {
+                if (!part.length || !part.qty) continue;
+                if (normalize(part.shape ?? '') === 'la det') continue;
+
+                const key = JSON.stringify([
+                    part.box_width,
+                    part.box_height,
+                    normalize(part.type ?? ''),
+                    normalize(part.shape ?? ''),
+                    part.thickness,
+                    part.cut,
+                ]);
+
+                if (!grouped.has(key)) {
+                    grouped.set(key, {
+                        box_width: part.box_width,
+                        box_length: part.box_height,
+                        type: part.type,
+                        shape: part.shape,
+                        thickness: part.thickness,
+                        cut: part.cut,
+                        usageMap: new Map(),
+                    });
+                }
+
+                const group = grouped.get(key);
+                const totalQty = Math.round(part.qty * qty);
+                if (totalQty <= 0) continue;
+
+                const existing = group.usageMap.get(part.length);
+                if (!existing) {
+                    group.usageMap.set(part.length, { qty: totalQty, productCodes: new Set([product.code]) });
+                } else {
+                    existing.qty += totalQty;
+                    existing.productCodes.add(product.code);
+                }
+            }
+        }
+    }
+
+    const materials = Array.from(grouped.values())
+        .map(item => ({
+            box_width: item.box_width,
+            box_length: item.box_length,
+            type: item.type,
+            shape: item.shape,
+            thickness: item.thickness,
+            cut: item.cut,
+            usage: Array.from(item.usageMap.entries())
+                .sort(([a], [b]) => a - b)
+                .map(([length, { qty, productCodes }]) => ({
+                    length, qty, productCodes: Array.from(productCodes),
+                })),
+        }))
+        .sort((a, b) => {
+            const aL = a.box_length ?? -Infinity;
+            const bL = b.box_length ?? -Infinity;
+            if (aL !== bL) return bL - aL;
+            return `${a.type}${a.shape}${a.cut}`.localeCompare(`${b.type}${b.shape}${b.cut}`, 'vi', { sensitivity: 'base' });
+        });
+
+    const plans = materials.map(computeMaterialPlan);
+    return { materials, plans };
+}
+
+function computeMaterialPlan(material) {
+    const lengths = [];
+    const quantities = [];
+
+    for (const usage of material.usage) {
+        const length = Number(usage.length);
+        const qty = Number(usage.qty);
+        if (!Number.isFinite(length) || !Number.isFinite(qty) || qty <= 0) continue;
+        lengths.push(Math.trunc(length));
+        quantities.push(Math.trunc(qty));
+    }
+
+    const maxInputLength = lengths.length ? Math.max(...lengths) : 0;
+    const finalMaxPatternWaste = Math.max(DEFAULT_MAX_PATTERN_WASTE, Math.ceil(0.99 * maxInputLength));
+
+    const input = {
+        lengths,
+        quantities,
+        stock_length: STOCK_LENGTH,
+        bundle_size: 1,
+        max_pattern_waste: finalMaxPatternWaste,
+    };
+
+    let result = null;
+    let error = null;
+
+    if (!lengths.length) {
+        error = 'Không có chi tiết hợp lệ.';
+    } else {
+        try {
+            result = compute_cutting_plan_numeric(input);
+        } catch (caught) {
+            error = caught?.message || String(caught);
+        }
+    }
+
+    return {
+        material,
+        input,
+        result,
+        error,
+        sourceCount: material.usage.length,
+        requiredTotal: quantities.reduce((sum, q) => sum + q, 0),
+    };
 }

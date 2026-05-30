@@ -88,7 +88,7 @@ function buildProductItem(product, { onToggle, onQtyChange }) {
 // ── Results panel ──────────────────────────────────────────────────────────────
 
 export function renderResults(viewModel, { onExportEnabled }) {
-    const { order_name, plans, powderCoating, steelWeight, steelArea, woodArea, woodVolume } = viewModel;
+    const { order_name, plans, powderCoating, woodPainting, steelWeight, steelArea, woodArea, woodVolume } = viewModel;
 
     if (el.resultsPanelTitle) {
         el.resultsPanelTitle.textContent = order_name
@@ -100,8 +100,9 @@ export function renderResults(viewModel, { onExportEnabled }) {
     const fragment = document.createDocumentFragment();
 
     fragment.appendChild(buildStatCardsRow(steelWeight, steelArea, woodArea, woodVolume));
-    fragment.appendChild(makeCollapsible('Kế hoạch cắt sắt', body => buildCuttingPlansContent(body, plans), false));
+    fragment.appendChild(makeCollapsible('Kế hoạch cắt sắt', body => buildCuttingPlansContent(body, plans), false, buildCuttingWasteBadge(plans)));
     fragment.appendChild(makeCollapsible('Yêu cầu sơn sắt', body => { body.appendChild(buildPowderCoatingContent(powderCoating)); }, false));
+    fragment.appendChild(makeCollapsible('Yêu cầu sơn gỗ', body => { body.appendChild(buildPowderCoatingContent(woodPainting)); }, false));
 
     el.resultsList.appendChild(fragment);
     onExportEnabled(plans.length > 0);
@@ -139,7 +140,26 @@ function buildStatCardsRow(steelWeight, steelArea, woodArea, woodVolume) {
     return row;
 }
 
-function makeCollapsible(titleText, buildBody, defaultOpen = true) {
+function buildCuttingWasteBadge(plans) {
+    let totalWasteMm = 0;
+    let totalStockMm = 0;
+    for (const plan of plans) {
+        if (!plan.result) continue;
+        totalWasteMm += Number(plan.result.total_waste || 0);
+        totalStockMm += Number(plan.result.stock_qty || 0) * Number(plan.input.stock_length || 0);
+    }
+    if (!totalStockMm) return null;
+
+    const wasteM = totalWasteMm / 1000;
+    const wastePct = (totalWasteMm / totalStockMm) * 100;
+
+    const badge = document.createElement('span');
+    badge.className = 'collapsible-waste-badge';
+    badge.textContent = `Hao hụt ${wasteM.toFixed(2)} m (${wastePct.toFixed(2)}%)`;
+    return badge;
+}
+
+function makeCollapsible(titleText, buildBody, defaultOpen = true, badge = null) {
     const details = document.createElement('details');
     details.className = 'results-collapsible';
     details.open = defaultOpen;
@@ -156,6 +176,7 @@ function makeCollapsible(titleText, buildBody, defaultOpen = true) {
     const titleEl = document.createElement('span');
     titleEl.textContent = titleText;
     summary.appendChild(titleEl);
+    if (badge) summary.appendChild(badge);
     details.appendChild(summary);
 
     const body = document.createElement('div');
@@ -242,9 +263,9 @@ function buildSummaryBadges(plan, isAlert) {
 
         const badge = document.createElement('span');
         badge.className = 'waste-badge' + (isAlert ? ' waste-badge--alert' : ' waste-badge--ok');
-        badge.appendChild(document.createTextNode('Cần '));
+        badge.appendChild(document.createTextNode('Cắt '));
         badge.appendChild(stockQty);
-        badge.appendChild(document.createTextNode(' thanh, dư '));
+        badge.appendChild(document.createTextNode(' thanh, hao hụt '));
         badge.appendChild(wastePct);
         badge.appendChild(document.createTextNode('%'));
         badges.appendChild(badge);
@@ -469,7 +490,8 @@ export function materialLabel(material) {
     const boxW = material?.box_width || null;
     const dim = boxL || boxW ? `${boxL}x${boxW}` : null;
     const thickness = material?.thickness != null ? `${material.thickness} mm` : null;
-    const parts = [type, shape, dim, thickness].filter(Boolean);
+    const cut = material?.cut || null;
+    const parts = [type, shape, dim, thickness, cut].filter(Boolean);
     return (parts.length ? parts.join(' · ') : 'Vật liệu').toLocaleLowerCase('vi');
 }
 

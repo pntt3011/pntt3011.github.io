@@ -1,4 +1,4 @@
-import initWasm, { compute_cutting_plan_numeric } from '../shared/lib/pkg/steel_cutting_wasm.js';
+import initWasm from '../shared/lib/pkg/steel_cutting_wasm.js';
 import { buildViewModel } from './viewmodel.js';
 import * as Render from './view.js';
 
