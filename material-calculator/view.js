@@ -1,0 +1,484 @@
+// render.js — UI rendering from viewmodel data only
+
+const numberFormatter = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 });
+const areaFormatter = new Intl.NumberFormat('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const WASTE_ALERT_PCT = 1.0;
+
+let el = {};
+
+export function init(elements) {
+    el = elements;
+}
+
+// ── Product list ───────────────────────────────────────────────────────────────
+
+export function renderProducts(products, { onToggle, onQtyChange }) {
+    if (!products.length) {
+        el.productList.innerHTML = '';
+        el.productListSection.hidden = true;
+        return;
+    }
+
+    el.productListSection.hidden = false;
+    el.productCount.textContent = `${products.length} sản phẩm`;
+    el.productList.innerHTML = '';
+
+    const fragment = document.createDocumentFragment();
+    for (const product of products) {
+        fragment.appendChild(buildProductItem(product, { onToggle, onQtyChange }));
+    }
+    el.productList.appendChild(fragment);
+}
+
+function buildProductItem(product, { onToggle, onQtyChange }) {
+    const item = document.createElement('div');
+    item.className = 'product-item' + (product.enabled ? '' : ' product-item--disabled');
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'product-checkbox';
+    checkbox.checked = product.enabled;
+    checkbox.addEventListener('change', () => {
+        item.classList.toggle('product-item--disabled', !checkbox.checked);
+        onToggle(product.sheetName, checkbox.checked);
+    });
+
+    const info = document.createElement('div');
+    info.className = 'product-info';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'product-name';
+    nameEl.textContent = product.name;
+
+    const metaEl = document.createElement('div');
+    metaEl.className = 'product-meta';
+    metaEl.textContent = product.code;
+
+    info.appendChild(nameEl);
+    info.appendChild(metaEl);
+
+    const qtyControl = document.createElement('div');
+    qtyControl.className = 'product-qty-control';
+
+    const qtyLabel = document.createElement('span');
+    qtyLabel.className = 'product-qty-label';
+    qtyLabel.textContent = 'SL:';
+
+    const qtyInput = document.createElement('input');
+    qtyInput.type = 'number';
+    qtyInput.className = 'product-qty-input';
+    qtyInput.min = '0';
+    qtyInput.step = '1';
+    qtyInput.value = product.qty;
+    qtyInput.addEventListener('change', () => {
+        const newQty = Math.max(0, Math.trunc(Number(qtyInput.value) || 0));
+        qtyInput.value = newQty;
+        onQtyChange(product.sheetName, newQty);
+    });
+
+    qtyControl.appendChild(qtyLabel);
+    qtyControl.appendChild(qtyInput);
+
+    item.appendChild(checkbox);
+    item.appendChild(info);
+    item.appendChild(qtyControl);
+    return item;
+}
+
+// ── Results panel ──────────────────────────────────────────────────────────────
+
+export function renderResults(viewModel, { onExportEnabled }) {
+    const { order_name, plans, powderCoating, totalWeight, totalArea, totalVolume } = viewModel;
+
+    if (el.resultsPanelTitle) {
+        el.resultsPanelTitle.textContent = order_name
+            ? `Thông tin lệnh sản xuất ${order_name}`
+            : 'Thông tin lệnh sản xuất';
+    }
+
+    el.resultsList.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+
+    fragment.appendChild(buildStatCardsRow(totalWeight, totalArea, totalVolume));
+    fragment.appendChild(makeCollapsible('Kế hoạch cắt phôi', body => buildCuttingPlansContent(body, plans), false));
+    fragment.appendChild(makeCollapsible('Yêu cầu sơn', body => { body.appendChild(buildPowderCoatingContent(powderCoating)); }, false));
+
+    el.resultsList.appendChild(fragment);
+    onExportEnabled(plans.length > 0);
+}
+
+function buildStatCardsRow(totalWeight, totalArea, totalVolume) {
+    const row = document.createElement('div');
+    row.className = 'summary-stats';
+
+    const cards = [
+        { label: 'Trọng lượng SX', value: areaFormatter.format(totalWeight), unit: 'kg' },
+        { label: 'Diện tích SX', value: areaFormatter.format(totalArea), unit: 'm²' },
+        { label: 'Thể tích SX', value: areaFormatter.format(totalVolume), unit: 'm³' },
+    ];
+
+    for (const card of cards) {
+        const cardEl = document.createElement('div');
+        cardEl.className = 'summary-stat-card';
+        const labelEl = document.createElement('span');
+        labelEl.className = 'summary-stat-label';
+        labelEl.textContent = card.label;
+        const valueEl = document.createElement('strong');
+        valueEl.className = 'summary-stat-value';
+        valueEl.textContent = card.value;
+        const unitEl = document.createElement('span');
+        unitEl.className = 'summary-stat-unit';
+        unitEl.textContent = card.unit;
+        cardEl.appendChild(labelEl);
+        cardEl.appendChild(valueEl);
+        cardEl.appendChild(unitEl);
+        row.appendChild(cardEl);
+    }
+
+    return row;
+}
+
+function makeCollapsible(titleText, buildBody, defaultOpen = true) {
+    const details = document.createElement('details');
+    details.className = 'results-collapsible';
+    details.open = defaultOpen;
+
+    const summary = document.createElement('summary');
+    summary.className = 'results-collapsible-header';
+    summary.innerHTML = `
+        <span class="toggle-icon" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+        </span>`;
+    const titleEl = document.createElement('span');
+    titleEl.textContent = titleText;
+    summary.appendChild(titleEl);
+    details.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'results-collapsible-body';
+    buildBody(body);
+    details.appendChild(body);
+
+    return details;
+}
+
+function buildCuttingPlansContent(body, plans) {
+    if (!plans.length) {
+        const empty = document.createElement('p');
+        empty.className = 'results-section-empty';
+        empty.textContent = 'Không tìm thấy nhóm vật liệu nào đủ dữ liệu.';
+        body.appendChild(empty);
+        return;
+    }
+
+    const sortedPlans = plans.slice().sort((a, b) =>
+        materialLabel(a.material).localeCompare(materialLabel(b.material), 'vi', { sensitivity: 'base' })
+    );
+
+    for (const plan of sortedPlans) {
+        const isAlert = !plan.error && plan.result?.percentage_wasted >= WASTE_ALERT_PCT;
+
+        const detail = document.createElement('details');
+        detail.className = 'material-details' + (isAlert ? ' material-details--alert' : '');
+
+        const summary = document.createElement('summary');
+        summary.appendChild(buildSummaryText(plan));
+        summary.appendChild(buildSummaryBadges(plan, isAlert));
+        detail.appendChild(summary);
+
+        const bodyEl = document.createElement('div');
+        bodyEl.className = 'material-body';
+        bodyEl.appendChild(buildSourceBlock(plan));
+        if (plan.error) {
+            bodyEl.appendChild(buildErrorBlock(plan.error));
+        } else {
+            bodyEl.appendChild(buildPatternBlock(plan));
+        }
+        detail.appendChild(bodyEl);
+        body.appendChild(detail);
+    }
+}
+
+function buildSummaryText(plan) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'summary-left';
+
+    const toggle = document.createElement('span');
+    toggle.className = 'toggle-icon';
+    toggle.setAttribute('aria-hidden', 'true');
+    toggle.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+    `;
+
+    const title = document.createElement('div');
+    title.className = 'material-title';
+    title.textContent = materialLabel(plan.material);
+
+    wrapper.appendChild(toggle);
+    wrapper.appendChild(title);
+    return wrapper;
+}
+
+function buildSummaryBadges(plan, isAlert) {
+    const badges = document.createElement('div');
+    badges.className = 'summary-badges summary-badges--text';
+
+    if (plan.error) {
+        badges.textContent = plan.error;
+    } else {
+        const stockQty = document.createElement('strong');
+        stockQty.className = 'summary-number';
+        stockQty.textContent = formatNumber(plan.result.stock_qty);
+
+        const wastePct = document.createElement('strong');
+        wastePct.className = 'summary-number';
+        wastePct.textContent = plan.result.percentage_wasted.toFixed(2);
+
+        const badge = document.createElement('span');
+        badge.className = 'waste-badge' + (isAlert ? ' waste-badge--alert' : ' waste-badge--ok');
+        badge.appendChild(document.createTextNode('Cần '));
+        badge.appendChild(stockQty);
+        badge.appendChild(document.createTextNode(' thanh, dư '));
+        badge.appendChild(wastePct);
+        badge.appendChild(document.createTextNode('%'));
+        badges.appendChild(badge);
+    }
+
+    return badges;
+}
+
+function buildSourceBlock(plan) {
+    const block = document.createElement('section');
+    block.className = 'source-block';
+
+    const title = document.createElement('div');
+    title.className = 'block-title';
+    title.textContent = 'Số lượng cần cắt';
+
+    const chips = document.createElement('div');
+    chips.className = 'chip-row';
+
+    for (const usage of plan.material.usage || []) {
+        const length = numberOrNull(usage.length);
+        const qty = numberOrNull(usage.qty);
+        if (length == null || qty == null || qty <= 0) continue;
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.textContent = `${formatNumber(length)} mm × ${formatNumber(qty)}`;
+        chips.appendChild(chip);
+    }
+
+    block.appendChild(title);
+    block.appendChild(chips);
+    return block;
+}
+
+function buildPatternBlock(plan) {
+    const block = document.createElement('section');
+    block.className = 'pattern-block';
+
+    const title = document.createElement('div');
+    title.className = 'block-title';
+    title.textContent = 'Kế hoạch cắt chi tiết';
+
+    const list = document.createElement('ul');
+    list.className = 'pattern-list';
+
+    const patterns = Array.isArray(plan.result.patterns) ? plan.result.patterns : [];
+    const lengths = Array.isArray(plan.result.lengths) ? plan.result.lengths : [];
+
+    const lengthToProductCodes = new Map();
+    for (const usage of plan.material.usage || []) {
+        lengthToProductCodes.set(Number(usage.length), usage.productCodes || []);
+    }
+
+    for (const pattern of patterns) {
+        const patternWastePct = plan.input.stock_length > 0
+            ? (pattern.waste / plan.input.stock_length) * 100
+            : 0;
+        const patternAlert = patternWastePct >= WASTE_ALERT_PCT;
+
+        const patternCodes = new Set();
+        lengths.forEach((length, i) => {
+            if (Number(pattern.counts?.[i] || 0) > 0) {
+                (lengthToProductCodes.get(Number(length)) || []).forEach(c => patternCodes.add(c));
+            }
+        });
+
+        const item = document.createElement('li');
+        item.className = 'pattern-item' + (patternAlert ? ' pattern-item--alert' : '');
+
+        const head = document.createElement('div');
+        head.className = 'pattern-head';
+
+        const name = document.createElement('div');
+        name.className = 'pattern-name';
+        name.textContent = Array.from(patternCodes).join(' · ') || '—';
+        if (pattern.is_secondary) {
+            const secondary = document.createElement('small');
+            secondary.textContent = '(cắt cơ)';
+            name.appendChild(secondary);
+        }
+
+        const meta = document.createElement('div');
+        meta.className = 'pattern-meta';
+        meta.innerHTML = `<span class="pattern-qty">× ${formatNumber(pattern.qty)}</span>`;
+
+        head.appendChild(name);
+        head.appendChild(meta);
+
+        const chipRow = document.createElement('ul');
+        chipRow.className = 'pattern-sublist';
+        lengths.forEach((length, i) => {
+            const count = Number(pattern.counts?.[i] || 0);
+            if (count <= 0) return;
+            const li = document.createElement('li');
+            li.textContent = `${formatNumber(length)} mm × ${formatNumber(count)}`;
+            chipRow.appendChild(li);
+        });
+
+        const foot = document.createElement('div');
+        foot.className = 'pattern-foot';
+        const waste = document.createElement('span');
+        waste.className = 'waste-tag' + (patternAlert ? ' waste-tag--alert' : '');
+        waste.textContent = `dư ${formatNumber(pattern.waste)} mm / ${formatNumber(plan.input.stock_length)} mm`;
+        foot.appendChild(waste);
+
+        item.appendChild(head);
+        item.appendChild(chipRow);
+        item.appendChild(foot);
+        list.appendChild(item);
+    }
+
+    block.appendChild(title);
+    block.appendChild(list);
+    return block;
+}
+
+function buildPowderCoatingContent(powderCoating) {
+    if (!powderCoating.length) {
+        const empty = document.createElement('p');
+        empty.className = 'results-section-empty';
+        empty.textContent = 'Không tìm thấy dữ liệu mã màu trong file.';
+        return empty;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'coating-table';
+    const thead = document.createElement('thead');
+    thead.innerHTML = `<tr><th>Mã màu</th><th>Diện tích (m²)</th></tr>`;
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    for (const { code, area } of powderCoating) {
+        const tr = document.createElement('tr');
+        const tdCode = document.createElement('td');
+        tdCode.textContent = code;
+        const tdArea = document.createElement('td');
+        tdArea.textContent = areaFormatter.format(area);
+        tr.appendChild(tdCode);
+        tr.appendChild(tdArea);
+        tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    return table;
+}
+
+// ── State / status ─────────────────────────────────────────────────────────────
+
+export function renderEmptyState(title, description) {
+    el.resultsList.innerHTML = '';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'empty-state empty-state--wide';
+
+    const icon = document.createElement('div');
+    icon.className = 'empty-state-icon';
+    icon.innerHTML = `
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4h16v16H4z"></path>
+            <path d="M4 9h16"></path>
+            <path d="M9 4v16"></path>
+        </svg>
+    `;
+
+    const heading = document.createElement('h4');
+    heading.textContent = title;
+
+    const copy = document.createElement('p');
+    copy.textContent = description;
+
+    wrapper.appendChild(icon);
+    wrapper.appendChild(heading);
+    wrapper.appendChild(copy);
+    el.resultsList.appendChild(wrapper);
+}
+
+export function renderErrorState(title, detail) {
+    el.resultsList.innerHTML = '';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'error-state';
+
+    const heading = document.createElement('h4');
+    heading.textContent = title;
+
+    const copy = document.createElement('p');
+    copy.textContent = 'Hãy kiểm tra lại workbook hoặc thử một file khác.';
+    wrapper.appendChild(heading);
+    wrapper.appendChild(copy);
+
+    if (detail) {
+        const detailBox = document.createElement('div');
+        detailBox.className = 'error-detail';
+        detailBox.textContent = detail;
+        wrapper.appendChild(detailBox);
+    }
+
+    el.resultsList.appendChild(wrapper);
+}
+
+function buildErrorBlock(message) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'error-state';
+    const heading = document.createElement('h4');
+    heading.textContent = 'Không thể tính kế hoạch';
+    const copy = document.createElement('p');
+    copy.textContent = message;
+    wrapper.appendChild(heading);
+    wrapper.appendChild(copy);
+    return wrapper;
+}
+
+export function setStatus(element, kind, text) {
+    element.className = `status-pill status-pill--${kind}`;
+    element.textContent = text;
+}
+
+// ── Shared helpers (exported for app.js export logic) ─────────────────────────
+
+export function materialLabel(material) {
+    const type = material?.type || null;
+    const shape = material?.shape || null;
+    const boxL = material?.box_length || null;
+    const boxW = material?.box_width || null;
+    const dim = boxL || boxW ? `${boxL}x${boxW}` : null;
+    const thickness = material?.thickness != null ? `${material.thickness} mm` : null;
+    const parts = [type, shape, dim, thickness].filter(Boolean);
+    return (parts.length ? parts.join(' · ') : 'Vật liệu').toLocaleLowerCase('vi');
+}
+
+export function numberOrNull(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function formatNumber(value) {
+    const parsed = numberOrNull(value);
+    if (parsed == null) return '0';
+    return numberFormatter.format(Math.trunc(parsed));
+}
