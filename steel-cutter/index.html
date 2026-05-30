@@ -45,7 +45,7 @@
         <!-- ── Components ── -->
         <section class="card section-components">
 
-            <!-- Inline cut list table (add row lives in tfoot) -->
+            <!-- Cut list table -->
             <div class="table-wrap">
                 <table class="data-table" id="componentsTable">
                     <thead>
@@ -58,25 +58,26 @@
                     </thead>
                     <tbody id="selectedListBody"></tbody>
                     <tfoot>
-                        <tr class="add-row" id="addRow">
-                            <td></td>
+                        <tr class="add-row">
+                            <td class="row-num-cell add-row-icon">+</td>
                             <td>
-                                <input id="customLengthInput" type="number" class="inline-select" min="1" step="1" />
+                                <input id="customLengthInput" type="number" class="inline-select" min="1" step="1" placeholder="Chiều dài (mm)" />
                             </td>
                             <td>
-                                <input id="addRowQtyInput" type="number" class="qty-input" min="1" step="1" />
+                                <input id="addRowQtyInput" type="number" class="qty-input" min="1" step="1" placeholder="SL" />
                             </td>
-                            <td></td>
+                            <td class="remove-cell add-row-enter" aria-hidden="true">↵</td>
                         </tr>
                     </tfoot>
                 </table>
             </div>
 
-            <!-- Calculate button inside Components card -->
+            <!-- Calculate button -->
             <div class="components-footer">
                 <button id="calculateButton" type="button" class="primary-button calculate-btn" disabled>
                     Tính Toán
                 </button>
+                <p class="calc-hint">Thêm ít nhất một chi tiết để tính toán</p>
             </div>
         </section>
 

@@ -1,16 +1,16 @@
 /* ── Design tokens ── */
 :root {
-  --bg: #f0f2f5;
+  --bg: #f5f4f1;
   --card: #ffffff;
-  --card-border: #e2e4e9;
+  --card-border: #e5e2dd;
   --text: #1a1c21;
   --muted: #6b7280;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
-  --accent-muted: rgba(37, 99, 235, 0.12);
+  --accent-muted: rgba(37, 99, 235, 0.10);
   --danger: #dc2626;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
-  --shadow-md: 0 4px 16px rgba(0,0,0,.08), 0 2px 6px rgba(0,0,0,.06);
+  --shadow-sm: 0 1px 3px rgba(20,15,5,.07), 0 1px 2px rgba(20,15,5,.05);
+  --shadow-md: 0 4px 16px rgba(20,15,5,.08), 0 2px 6px rgba(20,15,5,.05);
   --radius-sm: 8px;
   --radius-md: 14px;
   --radius-lg: 20px;
@@ -22,7 +22,7 @@
 html { min-height: 100%; background: var(--bg); }
 
 body {
-  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", ui-sans-serif, sans-serif;
   color: var(--text);
   font-size: 15px;
   line-height: 1.5;
@@ -105,10 +105,10 @@ select:disabled { opacity: 0.5; cursor: not-allowed; background: #f1f5f9; }
   border: 1px solid var(--card-border);
 }
 .secondary-button:hover:not(:disabled) {
-  color: #fff;
-  background: var(--accent);
+  color: var(--accent);
+  background: var(--accent-muted);
+  border-color: var(--accent);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.22);
 }
 .secondary-button:disabled {
   opacity: 0.45;
@@ -161,10 +161,9 @@ select:disabled { opacity: 0.5; cursor: not-allowed; background: #f1f5f9; }
 }
 
 .section-title {
-  font-weight: 700;
+  font-weight: 600;
   font-size: 0.85rem;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   color: var(--muted);
 }
 

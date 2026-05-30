@@ -219,6 +219,19 @@ body {
   padding-top: 10px;
 }
 
+.calc-hint {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+#calculateButton:disabled ~ .calc-hint {
+  opacity: 1;
+}
+
 .calculate-button {
   width: 100%;
   display: flex;

@@ -130,8 +130,6 @@ function addSelectedLength() {
         qty_needed: qty,
     });
 
-    state.selectedRows.sort((a, b) => b.lengthOfDetailCm - a.lengthOfDetailCm);
-
     renderSelectedRows();
     updateCalculateState();
 

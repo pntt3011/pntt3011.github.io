@@ -41,10 +41,9 @@ h1 {
 }
 
 h2.section-title {
-  font-size: 0.82rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--muted);
   margin-bottom: 14px;
 }
@@ -73,14 +72,6 @@ label span {
   color: var(--muted);
   letter-spacing: 0.02em;
 }
-
-/* ── tfoot add-row ── */
-.data-table tfoot tr.add-row {
-  background: #f8fafc;
-  border-top: 2px dashed var(--card-border);
-}
-.data-table tfoot tr.add-row td { padding: 8px 10px; border-bottom: none; }
-.data-table tfoot tr.add-row:hover { background: #f0f6ff; }
 
 .inline-select {
   width: 100%;
@@ -167,13 +158,57 @@ label span {
   opacity: 1;
 }
 
+/* ── tfoot add row ── */
+.data-table tfoot .add-row {
+  border-top: 1.5px solid var(--card-border);
+  background: var(--bg);
+}
+
+.data-table tfoot .add-row td {
+  padding: 6px 10px;
+  border-bottom: none;
+}
+
+.add-row-icon {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.add-row-enter {
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow: visible !important;
+}
+
 /* ── Calculate footer ── */
 .components-footer {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
   padding-top: 14px;
   border-top: 1px solid var(--card-border);
   margin-top: 14px;
+}
+
+.calc-hint {
+  flex: 1 1 100%;
+  text-align: right;
+}
+
+.calc-hint {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: right;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+#calculateButton:disabled ~ .calc-hint {
+  opacity: 1;
 }
 
 .calculate-btn {
