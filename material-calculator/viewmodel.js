@@ -6,6 +6,7 @@ import {
 } from '../shared/lib/pkg/steel_cutting_wasm.js';
 
 const STOCK_LENGTH = 5950;
+const STOCK_DISPLAY_OFFSET = 50;
 const DEFAULT_MAX_PATTERN_WASTE = 600;
 
 export function buildViewModel(parsedResult, productConfigs) {
@@ -244,6 +245,7 @@ function computeMaterialPlan(material) {
     return {
         material,
         input,
+        displayStockLength: STOCK_LENGTH + STOCK_DISPLAY_OFFSET,
         result,
         error,
         sourceCount: material.usage.length,
@@ -294,6 +296,7 @@ export function computeOptimalMaterialPlan(material) {
             bundle_size: 1,
             max_pattern_waste: maxPatternWaste,
         },
+        displayStockLength: bestStockLength + STOCK_DISPLAY_OFFSET,
         result,
         error,
         sourceCount: material.usage.length,

@@ -375,11 +375,16 @@ function buildSummaryBadges(plan, isAlert) {
         wastePct.className = 'summary-number';
         wastePct.textContent = plan.result.percentage_wasted.toFixed(2);
 
+        const stockLen = document.createElement('strong');
+        stockLen.className = 'summary-number';
+        stockLen.textContent = formatNumber(plan.displayStockLength ?? plan.input.stock_length);
+
         const badge = document.createElement('span');
         badge.className = 'waste-badge' + (isAlert ? ' waste-badge--alert' : ' waste-badge--ok');
-        badge.appendChild(document.createTextNode('Cắt '));
         badge.appendChild(stockQty);
-        badge.appendChild(document.createTextNode(' thanh, hao hụt '));
+        badge.appendChild(document.createTextNode(' thanh '));
+        badge.appendChild(stockLen);
+        badge.appendChild(document.createTextNode('mm, hao hụt '));
         badge.appendChild(wastePct);
         badge.appendChild(document.createTextNode('%'));
         badges.appendChild(badge);
@@ -482,7 +487,7 @@ function buildPatternBlock(plan, materialIsAlert = false) {
         foot.className = 'pattern-foot';
         const waste = document.createElement('span');
         waste.className = 'waste-tag' + (patternAlert ? ' waste-tag--alert' : '');
-        waste.textContent = `dư ${formatNumber(pattern.waste)} mm / ${formatNumber(plan.input.stock_length)} mm`;
+        waste.textContent = `hao hụt ${formatNumber(pattern.waste)} mm / ${formatNumber(plan.displayStockLength ?? plan.input.stock_length)} mm`;
         foot.appendChild(waste);
 
         item.appendChild(head);

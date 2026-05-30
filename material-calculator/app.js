@@ -249,114 +249,86 @@ function exportExcel() {
     summaryTitleRows.push(summaryRows.length);
     summaryRows.push(['TỔNG HỢP CẮT PHÔI']);
     summaryRows.push(['Số nhóm vật liệu', vm.plans.length]);
-    summaryRows.push(['Chiều dài vật liệu', 5950, 'mm']);
 
-    let totalBars = 0;
-    let totalWaste = 0;
+    let totalBars = 0, totalWaste = 0;
+    let totalBarsOpt = 0, totalWasteOpt = 0;
+    const hasOpt = Array.isArray(vm.optimizedPlans) && vm.optimizedPlans.some(p => p?.result);
     for (const plan of vm.plans) {
         if (!plan.result) continue;
         totalBars += Number(plan.result.stock_qty || 0);
         totalWaste += Number(plan.result.total_waste || 0);
     }
-    summaryRows.push(['Tổng số thanh vật liệu sử dụng', totalBars, 'cây phôi']);
-    summaryRows.push(['Tổng lượng dư thừa', totalWaste, 'mm']);
+    if (hasOpt) {
+        for (const plan of vm.optimizedPlans) {
+            if (!plan?.result) continue;
+            totalBarsOpt += Number(plan.result.stock_qty || 0);
+            totalWasteOpt += Number(plan.result.total_waste || 0);
+        }
+    }
+
+    summaryRows.push(['', 'Gốc', hasOpt ? 'Tối ưu' : '']);
+    summaryRows.push(['Chiều dài vật liệu (mm)', 6000, hasOpt ? '(xem chi tiết)' : '']);
+    summaryRows.push(['Tổng số thanh', totalBars, hasOpt ? totalBarsOpt : '']);
+    summaryRows.push(['Tổng lượng dư thừa (mm)', totalWaste, hasOpt ? totalWasteOpt : '']);
     summaryRows.push([]);
 
     summaryTitleRows.push(summaryRows.length);
     summaryRows.push(['CHI TIẾT THEO NHÓM VẬT LIỆU']);
     summaryTableHeaderRows.push(summaryRows.length);
-    summaryRows.push(['Vật liệu', 'Số nhóm chiều dài cần cắt', 'Số chi tiết', 'Số thanh', 'Tổng dư thừa (mm)', 'Tỷ lệ dư (%)']);
-    for (const plan of vm.plans) {
+    summaryRows.push([
+        'Vật liệu', 'Nhóm CD', 'Số chi tiết',
+        'Dài GC (mm)', 'Số thanh GC', 'Dư thừa GC (mm)', 'Tỷ lệ GC (%)',
+        ...(hasOpt ? ['Dài TU (mm)', 'Số thanh TU', 'Dư thừa TU (mm)', 'Tỷ lệ TU (%)'] : []),
+    ]);
+    for (let i = 0; i < vm.plans.length; i++) {
+        const plan = vm.plans[i];
+        const opt  = hasOpt ? vm.optimizedPlans[i] : null;
         summaryRows.push([
             Render.materialLabel(plan.material),
             plan.sourceCount,
             plan.requiredTotal,
+            plan.displayStockLength ?? plan.input.stock_length,
             plan.result ? plan.result.stock_qty : '',
             plan.result ? plan.result.total_waste : '',
             plan.result ? Number(plan.result.percentage_wasted.toFixed(2)) : '',
+            ...(hasOpt ? [
+                opt?.displayStockLength ?? opt?.input?.stock_length ?? '',
+                opt?.result ? opt.result.stock_qty : '',
+                opt?.result ? opt.result.total_waste : '',
+                opt?.result ? Number(opt.result.percentage_wasted.toFixed(2)) : '',
+            ] : []),
         ]);
     }
 
     const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
     XLSX.utils.book_append_sheet(workbook, summarySheet, 'TongHop');
 
-    const detailRows = [];
-    const detailTitleRows = [];
-    const detailHeaderRows = [];
-    const detailMerges = [];
-    detailRows.push(['CHI TIẾT MẪU CẮT']);
-    detailTitleRows.push(0);
-    detailRows.push([]);
-
-    let currentRow = detailRows.length;
-    let maxLengthCols = 0;
-
-    for (const plan of vm.plans) {
-        if (!plan.result || !Array.isArray(plan.result.patterns)) continue;
-
-        const materialLengths = Array.isArray(plan.result.lengths)
-            ? Array.from(new Set(plan.result.lengths.map(Number))).sort((a, b) => a - b)
-            : [];
-        maxLengthCols = Math.max(maxLengthCols, materialLengths.length);
-
-        detailTitleRows.push(currentRow);
-        detailRows.push([Render.materialLabel(plan.material)]);
-        const totalCols = 3 + materialLengths.length + 2;
-        detailMerges.push({ s: { r: currentRow, c: 0 }, e: { r: currentRow, c: totalCols - 1 } });
-        currentRow++;
-
-        detailHeaderRows.push(currentRow);
-        detailRows.push(['Vật liệu', 'Mã sản phẩm', 'Số lượng', ...materialLengths.map(l => `${l} mm`), 'Dư thừa (mm)', 'Dài vật tư (mm)']);
-        currentRow++;
-
-        const lengthToQty = new Map();
-        for (const usage of plan.material.usage || []) {
-            lengthToQty.set(Math.trunc(Number(usage.length)), Number(usage.qty) || 0);
-        }
-        detailRows.push([
-            Render.materialLabel(plan.material),
-            'Số lượng cần cắt',
-            plan.requiredTotal,
-            ...materialLengths.map(l => lengthToQty.get(l) || 0),
-            '', '',
-        ]);
-        currentRow++;
-
-        for (const pattern of plan.result.patterns) {
-            const lengthToProductCodes = new Map();
-            for (const usage of plan.material.usage || []) {
-                lengthToProductCodes.set(Number(usage.length), usage.productCodes || []);
-            }
-            const patternCodes = new Set();
-            materialLengths.forEach((length, i) => {
-                const idx = plan.result.lengths.findIndex(l => Number(l) === Number(length));
-                if (idx >= 0 && Number(pattern.counts?.[idx] || 0) > 0) {
-                    (lengthToProductCodes.get(Number(length)) || []).forEach(c => patternCodes.add(c));
-                }
-            });
-
-            const row = [Render.materialLabel(plan.material), Array.from(patternCodes).join(', ') || '—', pattern.qty];
-            materialLengths.forEach(length => {
-                const patternIndex = plan.result.lengths.findIndex(l => Number(l) === Number(length));
-                row.push(patternIndex >= 0 ? Number(pattern.counts?.[patternIndex] || 0) : 0);
-            });
-            row.push(pattern.waste, plan.input.stock_length);
-            detailRows.push(row);
-            currentRow++;
-        }
-
-        detailRows.push([]);
-        currentRow++;
-    }
-
+    const { rows: detailRows, titleRows: detailTitleRows, headerRows: detailHeaderRows, merges: detailMerges, maxLengthCols } =
+        buildDetailRows(vm.plans, 'CHI TIẾT MẪU CẮT - GỐC');
     const detailSheet = XLSX.utils.aoa_to_sheet(detailRows);
     XLSX.utils.book_append_sheet(workbook, detailSheet, 'ChiTiet');
+
+    if (hasOpt) {
+        const { rows: optRows, titleRows: optTitleRows, headerRows: optHeaderRows, merges: optMerges, maxLengthCols: optMaxCols } =
+            buildDetailRows(vm.optimizedPlans.filter(Boolean), 'CHI TIẾT MẪU CẮT - TỐI ƯU');
+        const optSheet = XLSX.utils.aoa_to_sheet(optRows);
+        XLSX.utils.book_append_sheet(workbook, optSheet, 'ToiUu');
+        applyWorkbookStyles(optSheet, {
+            titleRows: optTitleRows,
+            tableHeaderRows: optHeaderRows,
+            mergeRanges: optMerges,
+            columnWidths: [24, 22, 12, ...Array(optMaxCols).fill(12), 16, 14],
+            sectionFill, headerFill, thinBorder,
+        });
+    }
 
     applyWorkbookStyles(summarySheet, {
         titleRows: summaryTitleRows,
         tableHeaderRows: summaryTableHeaderRows,
         mergeRanges: [],
-        columnWidths: [28, 18, 14, 14, 18, 14],
+        columnWidths: hasOpt
+            ? [28, 12, 12, 14, 12, 16, 12, 14, 12, 16, 12]
+            : [28, 12, 12, 14, 12, 16, 12],
         sectionFill, headerFill, thinBorder,
     });
 
@@ -369,6 +341,81 @@ function exportExcel() {
     });
 
     XLSX.writeFile(workbook, fileName);
+}
+
+function buildDetailRows(plans, sheetTitle) {
+    const rows = [];
+    const titleRows = [];
+    const headerRows = [];
+    const merges = [];
+    let maxLengthCols = 0;
+
+    titleRows.push(rows.length);
+    rows.push([sheetTitle]);
+    rows.push([]);
+
+    let currentRow = rows.length;
+
+    for (const plan of plans) {
+        if (!plan.result || !Array.isArray(plan.result.patterns)) continue;
+
+        const materialLengths = Array.isArray(plan.result.lengths)
+            ? Array.from(new Set(plan.result.lengths.map(Number))).sort((a, b) => a - b)
+            : [];
+        maxLengthCols = Math.max(maxLengthCols, materialLengths.length);
+
+        titleRows.push(currentRow);
+        rows.push([Render.materialLabel(plan.material)]);
+        const totalCols = 3 + materialLengths.length + 2;
+        merges.push({ s: { r: currentRow, c: 0 }, e: { r: currentRow, c: totalCols - 1 } });
+        currentRow++;
+
+        headerRows.push(currentRow);
+        rows.push(['Vật liệu', 'Mã sản phẩm', 'Số lượng', ...materialLengths.map(l => `${l} mm`), 'Dư thừa (mm)', 'Dài vật tư (mm)']);
+        currentRow++;
+
+        const lengthToQty = new Map();
+        for (const usage of plan.material.usage || []) {
+            lengthToQty.set(Math.trunc(Number(usage.length)), Number(usage.qty) || 0);
+        }
+        rows.push([
+            Render.materialLabel(plan.material),
+            'Số lượng cần cắt',
+            plan.requiredTotal,
+            ...materialLengths.map(l => lengthToQty.get(l) || 0),
+            '', '',
+        ]);
+        currentRow++;
+
+        const lengthToProductCodes = new Map();
+        for (const usage of plan.material.usage || []) {
+            lengthToProductCodes.set(Number(usage.length), usage.productCodes || []);
+        }
+
+        for (const pattern of plan.result.patterns) {
+            const patternCodes = new Set();
+            materialLengths.forEach(length => {
+                const idx = plan.result.lengths.findIndex(l => Number(l) === Number(length));
+                if (idx >= 0 && Number(pattern.counts?.[idx] || 0) > 0) {
+                    (lengthToProductCodes.get(Number(length)) || []).forEach(c => patternCodes.add(c));
+                }
+            });
+
+            const row = [Render.materialLabel(plan.material), Array.from(patternCodes).join(', ') || '—', pattern.qty];
+            materialLengths.forEach(length => {
+                const patternIndex = plan.result.lengths.findIndex(l => Number(l) === Number(length));
+                row.push(patternIndex >= 0 ? Number(pattern.counts?.[patternIndex] || 0) : 0);
+            });
+            row.push(pattern.waste, plan.displayStockLength ?? plan.input.stock_length);
+            rows.push(row);
+            currentRow++;
+        }
+
+        rows.push([]);
+        currentRow++;
+    }
+
+    return { rows, titleRows, headerRows, merges, maxLengthCols };
 }
 
 function applyWorkbookStyles(sheet, { titleRows, tableHeaderRows, mergeRanges, columnWidths, sectionFill, headerFill, thinBorder }) {
