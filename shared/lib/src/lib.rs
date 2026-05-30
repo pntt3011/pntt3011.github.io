@@ -86,6 +86,74 @@ struct ScoredPattern {
 
 // ─── WASM entry points ────────────────────────────────────────────────────────
 
+// ─── Optimal stock-length search ─────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OptimalCuttingInput {
+    pub lengths: Vec<u32>,
+    pub quantities: Vec<u32>,
+    pub bundle_size: u32,
+    pub max_overcut_ratio: Option<f64>,
+    pub max_pattern_waste: Option<u32>,
+
+    /// Inclusive lower bound for the search. Defaults to the longest item length.
+    pub min_stock_length: Option<u32>,
+
+    /// Inclusive upper bound for the search.
+    pub max_stock_length: u32,
+
+    /// Coarse search step (mm). Defaults to 100.
+    pub stock_step: Option<u32>,
+
+    /// Explicit supplier stock lengths. When non-empty these are used as primary
+    /// candidates instead of scanning the coarse grid.
+    pub allowed_stock_lengths: Option<Vec<u32>>,
+
+    /// Whether to zoom in around the top candidates after the coarse pass.
+    /// Defaults to true.
+    pub refine: Option<bool>,
+
+    /// Number of best coarse candidates to refine around. Defaults to 12.
+    pub refine_top_k: Option<usize>,
+
+    /// Search radius around each promising length. Defaults to 2 × stock_step.
+    pub refine_radius: Option<u32>,
+
+    /// Fine step used during refinement. Defaults to 10, or 1 when stock_step ≤ 10.
+    pub refine_step: Option<u32>,
+
+    /// Maximum total candidates to evaluate. Defaults to 512.
+    pub max_candidates: Option<usize>,
+
+    /// Whether to add pattern-derived candidates (multiples and pairs of item
+    /// lengths). Defaults to true.
+    pub include_combination_candidates: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StockCandidateResult {
+    pub stock_length: u32,
+    pub stock_qty: u32,
+    pub total_stock_length: u64,
+    pub total_waste: u64,
+    pub percentage_wasted: f64,
+    pub pattern_count: usize,
+    pub secondary_stock_qty: u32,
+    pub overproduced_length: u64,
+    pub valid: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OptimalCuttingResult {
+    pub best_stock_length: u32,
+    pub best_score: Vec<u64>,
+    pub best_result: CuttingResult,
+    pub candidates: Vec<StockCandidateResult>,
+}
+
+// ─── WASM entry point ─────────────────────────────────────────────────────────
+
 #[wasm_bindgen]
 pub fn compute_cutting_plan_numeric(input: JsValue) -> Result<JsValue, JsValue> {
     let input: CuttingInput = serde_wasm_bindgen::from_value(input)
@@ -113,6 +181,445 @@ pub fn find_optimal_stock_length_numeric(input: JsValue) -> Result<JsValue, JsVa
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
+
+#[wasm_bindgen]
+pub fn compute_optimal_stock_cutting_plan_numeric(input: JsValue) -> Result<JsValue, JsValue> {
+    let input: OptimalCuttingInput = serde_wasm_bindgen::from_value(input)
+        .map_err(|e| JsValue::from_str(&format!("Invalid input: {e}")))?;
+
+    let result = compute_optimal_stock_cutting_plan(input)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    serde_wasm_bindgen::to_value(&result)
+        .map_err(|e| JsValue::from_str(&format!("Serialize failed: {e}")))
+}
+
+pub fn compute_optimal_stock_cutting_plan(
+    input: OptimalCuttingInput,
+) -> Result<OptimalCuttingResult, String> {
+    if input.lengths.len() != input.quantities.len() {
+        return Err("lengths and quantities must have same length".to_string());
+    }
+    if input.lengths.is_empty() {
+        return Err("no items".to_string());
+    }
+    if input.max_stock_length == 0 {
+        return Err("max_stock_length must be > 0".to_string());
+    }
+
+    let max_item_length = input
+        .lengths
+        .iter()
+        .zip(input.quantities.iter())
+        .filter(|(_, &qty)| qty > 0)
+        .map(|(&len, _)| len)
+        .max()
+        .ok_or_else(|| "no positive-quantity items".to_string())?;
+
+    let min_stock = input
+        .min_stock_length
+        .unwrap_or(max_item_length)
+        .max(max_item_length);
+    let max_stock = input.max_stock_length;
+
+    if min_stock > max_stock {
+        return Err(
+            "min_stock_length must be <= max_stock_length and >= longest item".to_string(),
+        );
+    }
+
+    let stock_step = input.stock_step.unwrap_or(100).max(1);
+    let max_candidates = input.max_candidates.unwrap_or(512).max(1);
+
+    let mut candidates = generate_stock_candidates(
+        &input,
+        min_stock,
+        max_stock,
+        stock_step,
+        max_candidates,
+    );
+
+    if candidates.is_empty() {
+        return Err("no stock length candidates generated".to_string());
+    }
+
+    let total_req_len = total_required_length(&input.lengths, &input.quantities);
+    let mut summaries: Vec<StockCandidateResult> = Vec::new();
+    let mut valid_results: Vec<(Vec<u64>, u32, CuttingResult)> = Vec::new();
+    let mut best_primary_cost: Option<u64> = None;
+
+    for &stock in candidates.iter() {
+        if let Some(best_cost) = best_primary_cost {
+            let lb_qty = ceil_div(total_req_len, stock as u64) as u64;
+            let lb_cost = lb_qty.saturating_mul(stock as u64);
+            if lb_cost > best_cost {
+                summaries.push(StockCandidateResult {
+                    stock_length: stock,
+                    stock_qty: 0,
+                    total_stock_length: lb_cost,
+                    total_waste: 0,
+                    percentage_wasted: 0.0,
+                    pattern_count: 0,
+                    secondary_stock_qty: 0,
+                    overproduced_length: 0,
+                    valid: false,
+                    error: Some("pruned by lower bound".to_string()),
+                });
+                continue;
+            }
+        }
+
+        let trial = CuttingInput {
+            lengths: input.lengths.clone(),
+            quantities: input.quantities.clone(),
+            stock_length: stock,
+            bundle_size: input.bundle_size,
+            max_overcut_ratio: input.max_overcut_ratio,
+            max_pattern_waste: input.max_pattern_waste,
+        };
+
+        match compute_cutting_plan(trial) {
+            Ok(result) => {
+                let summary = summarize_candidate(stock, &result);
+                if result.valid {
+                    let score = score_cutting_result(stock, &result);
+                    best_primary_cost = Some(match best_primary_cost {
+                        None => score[0],
+                        Some(current) => current.min(score[0]),
+                    });
+                    valid_results.push((score, stock, result));
+                }
+                summaries.push(summary);
+            }
+            Err(e) => {
+                summaries.push(StockCandidateResult {
+                    stock_length: stock,
+                    stock_qty: 0,
+                    total_stock_length: 0,
+                    total_waste: 0,
+                    percentage_wasted: 0.0,
+                    pattern_count: 0,
+                    secondary_stock_qty: 0,
+                    overproduced_length: 0,
+                    valid: false,
+                    error: Some(e),
+                });
+            }
+        }
+    }
+
+    if input.refine.unwrap_or(true) && !valid_results.is_empty() {
+        let refine_top_k = input.refine_top_k.unwrap_or(12).max(1);
+        let refine_radius = input
+            .refine_radius
+            .unwrap_or(stock_step.saturating_mul(2))
+            .max(1);
+        let refine_step = input
+            .refine_step
+            .unwrap_or(if stock_step <= 10 { 1 } else { 10 })
+            .max(1);
+
+        valid_results.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut refined = std::collections::BTreeSet::new();
+        for (_, stock, _) in valid_results.iter().take(refine_top_k) {
+            let start = stock.saturating_sub(refine_radius).max(min_stock);
+            let end = stock.saturating_add(refine_radius).min(max_stock);
+            let mut s = start;
+            while s <= end {
+                refined.insert(s);
+                match s.checked_add(refine_step) {
+                    Some(next) if next > s => s = next,
+                    _ => break,
+                }
+            }
+        }
+
+        for s in refined {
+            if !candidates.contains(&s) {
+                candidates.push(s);
+            }
+        }
+
+        candidates.sort_unstable();
+        candidates.dedup();
+
+        for &stock in candidates.iter() {
+            if summaries.iter().any(|x| x.stock_length == stock) {
+                continue;
+            }
+
+            let trial = CuttingInput {
+                lengths: input.lengths.clone(),
+                quantities: input.quantities.clone(),
+                stock_length: stock,
+                bundle_size: input.bundle_size,
+                max_overcut_ratio: input.max_overcut_ratio,
+                max_pattern_waste: input.max_pattern_waste,
+            };
+
+            match compute_cutting_plan(trial) {
+                Ok(result) => {
+                    let summary = summarize_candidate(stock, &result);
+                    if result.valid {
+                        let score = score_cutting_result(stock, &result);
+                        valid_results.push((score, stock, result));
+                    }
+                    summaries.push(summary);
+                }
+                Err(e) => {
+                    summaries.push(StockCandidateResult {
+                        stock_length: stock,
+                        stock_qty: 0,
+                        total_stock_length: 0,
+                        total_waste: 0,
+                        percentage_wasted: 0.0,
+                        pattern_count: 0,
+                        secondary_stock_qty: 0,
+                        overproduced_length: 0,
+                        valid: false,
+                        error: Some(e),
+                    });
+                }
+            }
+        }
+    }
+
+    valid_results.sort_by(|a, b| a.0.cmp(&b.0));
+    summaries.sort_by_key(|s| {
+        (
+            !s.valid,
+            if s.total_stock_length == 0 {
+                u64::MAX
+            } else {
+                s.total_stock_length
+            },
+            s.total_waste,
+            s.pattern_count as u64,
+            s.stock_length as u64,
+        )
+    });
+
+    let Some((best_score, best_stock_length, best_result)) =
+        valid_results.into_iter().next()
+    else {
+        return Err(
+            "no valid cutting result found for any stock length candidate".to_string(),
+        );
+    };
+
+    Ok(OptimalCuttingResult {
+        best_stock_length,
+        best_score,
+        best_result,
+        candidates: summaries,
+    })
+}
+
+fn generate_stock_candidates(
+    input: &OptimalCuttingInput,
+    min_stock: u32,
+    max_stock: u32,
+    stock_step: u32,
+    max_candidates: usize,
+) -> Vec<u32> {
+    let mut set = std::collections::BTreeSet::new();
+
+    if let Some(allowed) = &input.allowed_stock_lengths {
+        for &s in allowed {
+            if s >= min_stock && s <= max_stock {
+                set.insert(s);
+            }
+        }
+    }
+
+    if set.is_empty() {
+        let mut s = ceil_to_step(min_stock, stock_step);
+        while s <= max_stock && set.len() < max_candidates {
+            set.insert(s);
+            match s.checked_add(stock_step) {
+                Some(next) if next > s => s = next,
+                _ => break,
+            }
+        }
+        set.insert(min_stock);
+        set.insert(max_stock);
+    }
+
+    if input.include_combination_candidates.unwrap_or(true) {
+        add_combination_stock_candidates(
+            &mut set,
+            &input.lengths,
+            &input.quantities,
+            min_stock,
+            max_stock,
+            stock_step,
+            max_candidates.saturating_mul(2),
+        );
+    }
+
+    let mut out: Vec<u32> = set.into_iter().collect();
+
+    if out.len() > max_candidates {
+        let stride = (out.len() as f64 / max_candidates as f64).ceil() as usize;
+        let mut sampled = Vec::with_capacity(max_candidates);
+        let mut i = 0usize;
+        while i < out.len() && sampled.len() + 1 < max_candidates {
+            sampled.push(out[i]);
+            i += stride.max(1);
+        }
+        if let Some(&last) = out.last() {
+            if sampled.last().copied() != Some(last) {
+                sampled.push(last);
+            }
+        }
+        out = sampled;
+    }
+
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+fn add_combination_stock_candidates(
+    set: &mut std::collections::BTreeSet<u32>,
+    lengths: &[u32],
+    quantities: &[u32],
+    min_stock: u32,
+    max_stock: u32,
+    stock_step: u32,
+    limit: usize,
+) {
+    let mut useful: Vec<u32> = lengths
+        .iter()
+        .zip(quantities.iter())
+        .filter_map(|(&len, &qty)| if qty > 0 && len > 0 { Some(len) } else { None })
+        .collect();
+
+    useful.sort_unstable_by(|a, b| b.cmp(a));
+    useful.dedup();
+    useful.truncate(18);
+
+    for &len in &useful {
+        let mut used = len;
+        while used <= max_stock && set.len() < limit {
+            if used >= min_stock {
+                set.insert(ceil_to_step(used, stock_step).min(max_stock));
+                if stock_step > 1 {
+                    set.insert(used);
+                }
+            }
+            match used.checked_add(len) {
+                Some(next) if next > used => used = next,
+                _ => break,
+            }
+        }
+    }
+
+    'outer: for i in 0..useful.len() {
+        for j in i..useful.len() {
+            let base = useful[i].saturating_add(useful[j]);
+            if base > max_stock {
+                continue;
+            }
+            if base >= min_stock {
+                set.insert(ceil_to_step(base, stock_step).min(max_stock));
+                if stock_step > 1 {
+                    set.insert(base);
+                }
+            }
+            for k in j..useful.len().min(j + 8) {
+                if set.len() >= limit {
+                    break 'outer;
+                }
+                let triple = base.saturating_add(useful[k]);
+                if triple > max_stock {
+                    continue;
+                }
+                if triple >= min_stock {
+                    set.insert(ceil_to_step(triple, stock_step).min(max_stock));
+                    if stock_step > 1 {
+                        set.insert(triple);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn ceil_to_step(value: u32, step: u32) -> u32 {
+    if step <= 1 {
+        value
+    } else {
+        ((value + step - 1) / step) * step
+    }
+}
+
+fn total_required_length(lengths: &[u32], quantities: &[u32]) -> u64 {
+    lengths
+        .iter()
+        .zip(quantities.iter())
+        .map(|(&len, &qty)| len as u64 * qty as u64)
+        .sum()
+}
+
+fn summarize_candidate(stock: u32, result: &CuttingResult) -> StockCandidateResult {
+    StockCandidateResult {
+        stock_length: stock,
+        stock_qty: result.stock_qty,
+        total_stock_length: stock as u64 * result.stock_qty as u64,
+        total_waste: result.total_waste,
+        percentage_wasted: result.percentage_wasted,
+        pattern_count: result.patterns.len(),
+        secondary_stock_qty: result
+            .patterns
+            .iter()
+            .filter(|p| p.is_secondary)
+            .map(|p| p.qty)
+            .sum(),
+        overproduced_length: {
+            let mut total = 0u64;
+            for i in 0..result.lengths.len() {
+                if result.produced[i] > result.required[i] {
+                    total += (result.produced[i] - result.required[i]) as u64
+                        * result.lengths[i] as u64;
+                }
+            }
+            total
+        },
+        valid: result.valid,
+        error: None,
+    }
+}
+
+fn score_cutting_result(stock: u32, result: &CuttingResult) -> Vec<u64> {
+    let secondary_qty: u32 = result
+        .patterns
+        .iter()
+        .filter(|p| p.is_secondary)
+        .map(|p| p.qty)
+        .sum();
+    let overproduced: u64 = {
+        let mut total = 0u64;
+        for i in 0..result.lengths.len() {
+            if result.produced[i] > result.required[i] {
+                total +=
+                    (result.produced[i] - result.required[i]) as u64 * result.lengths[i] as u64;
+            }
+        }
+        total
+    };
+    vec![
+        stock as u64 * result.stock_qty as u64,
+        result.total_waste,
+        secondary_qty as u64,
+        overproduced,
+        result.patterns.len() as u64,
+        stock as u64,
+    ]
+}
+
+// ─── Fixed-stock cutting plan ─────────────────────────────────────────────────
 
 pub fn compute_cutting_plan(input: CuttingInput) -> Result<CuttingResult, String> {
     let bundle_size = input.bundle_size.max(1);

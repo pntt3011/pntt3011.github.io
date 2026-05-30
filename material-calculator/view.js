@@ -88,7 +88,7 @@ function buildProductItem(product, { onToggle, onQtyChange }) {
 // ── Results panel ──────────────────────────────────────────────────────────────
 
 export function renderResults(viewModel, { onExportEnabled }) {
-    const { order_name, plans, powderCoating, woodPainting, steelWeight, steelArea, woodArea, woodVolume } = viewModel;
+    const { order_name, plans, optimizedPlans, powderCoating, woodPainting, steelWeight, steelArea, woodArea, woodVolume } = viewModel;
 
     if (el.resultsPanelTitle) {
         el.resultsPanelTitle.textContent = order_name
@@ -100,11 +100,10 @@ export function renderResults(viewModel, { onExportEnabled }) {
     const fragment = document.createDocumentFragment();
 
     fragment.appendChild(buildStatCardsRow(steelWeight, steelArea, woodArea, woodVolume));
-    const optimizedPlans = plans; // placeholder — wire real algorithm here later
-    const { badgeEl, setActiveView, wire } = buildCuttingDualBadge(plans, optimizedPlans);
+    const { badgeEl, setActiveView, wire } = buildCuttingDualBadge(plans, optimizedPlans ?? plans);
     fragment.appendChild(makeCollapsible(
         'Kế hoạch cắt sắt',
-        body => wire(buildCuttingPlansContent(body, plans, optimizedPlans, setActiveView)),
+        body => wire(buildCuttingPlansContent(body, plans, optimizedPlans ?? plans, setActiveView)),
         false,
         badgeEl,
     ));
