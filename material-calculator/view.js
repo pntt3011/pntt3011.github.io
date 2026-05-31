@@ -460,11 +460,6 @@ function buildPatternBlock(plan, materialIsAlert = false) {
         const name = document.createElement('div');
         name.className = 'pattern-name';
         name.textContent = Array.from(patternCodes).join(' · ') || '—';
-        if (pattern.is_secondary) {
-            const secondary = document.createElement('small');
-            secondary.textContent = '(cắt cơ)';
-            name.appendChild(secondary);
-        }
 
         const meta = document.createElement('div');
         meta.className = 'pattern-meta';
