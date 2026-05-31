@@ -13,7 +13,6 @@ const state = {
 };
 
 const elements = {};
-const areaFormatter = new Intl.NumberFormat('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function boot() {
     cacheElements();

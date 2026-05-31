@@ -43,17 +43,6 @@ pub struct CuttingResult {
     pub valid: bool,
 }
 
-/// Result of the optimal-stock-length search.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OptimalStockResult {
-    /// The stock length that minimises `stock_length × stock_qty`.
-    pub stock_length: u32,
-    /// Full cutting plan at that length.
-    pub result: CuttingResult,
-    /// How many candidate lengths were actually evaluated (diagnostics).
-    pub candidates_evaluated: u32,
-}
-
 // ─── Internal types ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy)]
@@ -160,20 +149,6 @@ pub fn compute_cutting_plan_numeric(input: JsValue) -> Result<JsValue, JsValue> 
         .map_err(|e| JsValue::from_str(&format!("Invalid input: {e}")))?;
 
     let result = compute_cutting_plan(input)
-        .map_err(|e| JsValue::from_str(&e))?;
-
-    serde_wasm_bindgen::to_value(&result)
-        .map_err(|e| JsValue::from_str(&format!("Serialize failed: {e}")))
-}
-
-/// Find the stock length in `[max(item_lengths), input.stock_length]` that
-/// minimises `stock_length × stock_qty`, then return the full cutting plan.
-#[wasm_bindgen]
-pub fn find_optimal_stock_length_numeric(input: JsValue) -> Result<JsValue, JsValue> {
-    let input: CuttingInput = serde_wasm_bindgen::from_value(input)
-        .map_err(|e| JsValue::from_str(&format!("Invalid input: {e}")))?;
-
-    let result = find_optimal_stock_length(input)
         .map_err(|e| JsValue::from_str(&e))?;
 
     serde_wasm_bindgen::to_value(&result)
@@ -707,168 +682,7 @@ pub fn compute_cutting_plan(input: CuttingInput) -> Result<CuttingResult, String
     Ok(build_result(final_selected, &lengths, &required, n, stock))
 }
 
-/// Search for the stock length L in `[max(item_lengths), input.stock_length]`
-/// that minimises `L × stock_qty(L)`.
-///
-/// # Candidate generation
-///
-/// Two complementary sets cover all practically optimal lengths:
-///
-/// 1. **Arithmetic candidates** — for each bar-count k, the minimum L that
-///    could pack all material into k bars is `ceil(S / k)` (where S is total
-///    useful length). The set `{ ceil(S/k) : k = 1..total_pieces }` has only
-///    O(√S) distinct values (same argument as `floor(n/k)` divisors).
-///
-/// 2. **Zero-waste candidates** — lengths reachable as a sum of item lengths
-///    (via DP), i.e. lengths where at least one pattern has zero waste.
-///    These are the best candidates for minimising total material.
-///
-/// Every candidate is lower-bound-pruned: `L × ceil(S/L) ≥ best_cost` ⟹ skip.
-pub fn find_optimal_stock_length(input: CuttingInput) -> Result<OptimalStockResult, String> {
-    if input.stock_length == 0 {
-        return Err("stock_length must be > 0".to_string());
-    }
-    if input.lengths.len() != input.quantities.len() {
-        return Err("lengths and quantities must have same length".to_string());
-    }
-    if input.lengths.is_empty() {
-        return Err("no items".to_string());
-    }
-
-    let max_l = input.stock_length;
-
-    // Validate and find min_L (must fit the largest item).
-    let min_l = input.lengths.iter().copied().max().unwrap_or(0);
-    if min_l == 0 {
-        return Err("all item lengths are zero".to_string());
-    }
-    if min_l > max_l {
-        return Err(format!(
-            "largest item length {min_l} exceeds stock_length {max_l}"
-        ));
-    }
-
-    // Total useful material (fixed regardless of L).
-    let total_useful: u64 = input
-        .lengths
-        .iter()
-        .zip(input.quantities.iter())
-        .map(|(&l, &q)| l as u64 * q as u64)
-        .sum();
-
-    if total_useful == 0 {
-        return Err("no items".to_string());
-    }
-
-    let total_pieces: u32 = input.quantities.iter().sum();
-
-    // ── Candidate set 1: arithmetic ─────────────────────────────────────────
-    // For bar count k, minimum L is ceil(S / k). O(√S) distinct values.
-    let mut candidates: Vec<u32> = Vec::new();
-    for k in 1..=total_pieces {
-        let l_k = (((total_useful + k as u64 - 1) / k as u64) as u32).max(min_l);
-        if l_k <= max_l {
-            candidates.push(l_k);
-        }
-    }
-
-    // ── Candidate set 2: zero-waste lengths via DP ───────────────────────────
-    // Reachable sums of item lengths up to max_l. At these lengths at least
-    // one pattern can have zero waste.
-    let zero_waste = reachable_sums(&input.lengths, max_l);
-    for l in zero_waste {
-        if l >= min_l {
-            candidates.push(l);
-        }
-    }
-
-    // Always include the caller's own stock_length as a baseline.
-    candidates.push(max_l);
-
-    // Deduplicate and sort by lower bound L × ceil(S/L) ascending so the
-    // best-potential candidates are evaluated first (faster pruning).
-    candidates.sort_unstable();
-    candidates.dedup();
-    candidates.sort_unstable_by_key(|&l| {
-        let k = ceil_div(total_useful, l as u64) as u64;
-        l as u64 * k
-    });
-
-    // ── Evaluate with pruning ────────────────────────────────────────────────
-    let mut best_cost = u64::MAX;
-    let mut best: Option<(u32, CuttingResult)> = None;
-    let mut evaluated: u32 = 0;
-
-    for l in candidates {
-        // Lower bound: even perfect packing can't beat L × ceil(S/L).
-        let lower_bound = {
-            let k = ceil_div(total_useful, l as u64) as u64;
-            l as u64 * k
-        };
-        if lower_bound >= best_cost {
-            continue;
-        }
-
-        let candidate_input = CuttingInput {
-            stock_length: l,
-            ..input.clone()
-        };
-
-        let Ok(result) = compute_cutting_plan(candidate_input) else {
-            continue;
-        };
-
-        if !result.valid {
-            continue;
-        }
-
-        evaluated += 1;
-        let cost = l as u64 * result.stock_qty as u64;
-        if cost < best_cost {
-            best_cost = cost;
-            best = Some((l, result));
-        }
-    }
-
-    match best {
-        Some((stock_length, result)) => Ok(OptimalStockResult {
-            stock_length,
-            result,
-            candidates_evaluated: evaluated,
-        }),
-        None => Err("no valid cutting plan found for any candidate stock length".to_string()),
-    }
-}
-
-// ─── Candidate helpers ────────────────────────────────────────────────────────
-
-/// DP: collect all lengths reachable as sums of item lengths up to `max_val`.
-/// These are the stock lengths where at least one zero-waste pattern exists.
-fn reachable_sums(item_lengths: &[u32], max_val: u32) -> Vec<u32> {
-    let sz = (max_val + 1) as usize;
-    let mut dp = vec![false; sz];
-    dp[0] = true;
-
-    for s in 0..sz {
-        if !dp[s] {
-            continue;
-        }
-        for &l in item_lengths {
-            let next = s + l as usize;
-            if next < sz {
-                dp[next] = true;
-            }
-        }
-    }
-
-    dp.iter()
-        .enumerate()
-        .filter(|&(i, &r)| r && i > 0)
-        .map(|(i, _)| i as u32)
-        .collect()
-}
-
-// ─── Core helpers (unchanged from original) ───────────────────────────────────
+// ─── Core helpers ────────────────────────────────────────────────────────────
 
 fn empty_result() -> CuttingResult {
     CuttingResult {

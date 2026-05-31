@@ -628,12 +628,12 @@ export function materialLabel(material) {
     return (parts.length ? parts.join(' · ') : 'Vật liệu').toLocaleLowerCase('vi');
 }
 
-export function numberOrNull(value) {
+function numberOrNull(value) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
 }
 
-export function formatNumber(value) {
+function formatNumber(value) {
     const parsed = numberOrNull(value);
     if (parsed == null) return '0';
     return numberFormatter.format(Math.trunc(parsed));

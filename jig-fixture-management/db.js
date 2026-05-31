@@ -1,7 +1,7 @@
 // db.js — IndexedDB schema and data-access layer for Jig & Fixture Management
 
-export const DB_NAME    = 'jig_mgmt';
-export const DB_VERSION = 1;
+const DB_NAME    = 'jig_mgmt';
+const DB_VERSION = 1;
 
 // ── Classification constants ───────────────────────────────────────────────────
 //
@@ -240,17 +240,6 @@ export async function getAllItems() {
   });
 }
 
-/** @returns {Promise<JigItem|null>} */
-export async function getItemById(id) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const req = db.transaction('items', 'readonly')
-                  .objectStore('items').get(id);
-    req.onsuccess = () => resolve(req.result ?? null);
-    req.onerror   = () => reject(req.error);
-  });
-}
-
 /**
  * Inserts a new item. The caller is responsible for supplying a `code`
  * obtained via generateCode(). Fields `id`, `createdAt`, and `updatedAt`
@@ -351,17 +340,6 @@ export async function queryItems(filters = {}) {
 //  Requisitions
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** @returns {Promise<Requisition[]>} */
-export async function getAllRequisitions() {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const req = db.transaction('requisitions', 'readonly')
-                  .objectStore('requisitions').getAll();
-    req.onsuccess = () => resolve(req.result);
-    req.onerror   = () => reject(req.error);
-  });
-}
-
 /**
  * @param {Omit<Requisition, 'id'|'createdAt'>} data
  * @returns {Promise<Requisition>}
@@ -374,30 +352,6 @@ export async function addRequisition(data) {
                   .objectStore('requisitions').add(item);
     req.onsuccess = () => resolve(item);
     req.onerror   = () => reject(req.error);
-  });
-}
-
-/**
- * @param {string}               id
- * @param {Partial<Requisition>} changes
- * @returns {Promise<Requisition>}
- */
-export async function updateRequisition(id, changes) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx    = db.transaction('requisitions', 'readwrite');
-    const store = tx.objectStore('requisitions');
-    const get   = store.get(id);
-
-    get.onsuccess = () => {
-      const existing = get.result;
-      if (!existing) { reject(new Error(`Requisition not found: ${id}`)); return; }
-      const updated = { ...existing, ...changes, id };
-      const put = store.put(updated);
-      put.onsuccess = () => resolve(updated);
-      put.onerror   = () => reject(put.error);
-    };
-    get.onerror = () => reject(get.error);
   });
 }
 

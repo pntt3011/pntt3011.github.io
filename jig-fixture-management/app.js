@@ -4,7 +4,7 @@ import {
   openDB, seedDemoData, clearAllData,
   PHAN_LOAI, PHAN_LOAI_LIST, TRANG_THAI, TRANG_THAI_LIST,
   generateCode,
-  getAllItems, addItem, updateItem, deleteItem, queryItems,
+  getAllItems, addItem, updateItem, queryItems,
   addRequisition,
 } from './db.js';
 
