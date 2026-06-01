@@ -222,7 +222,7 @@ async function calculate() {
 
     try {
         const result = state.computeCuttingPlan(input);
-        renderResults(result, stockLength);
+        renderResults(result, stockLength, bundleSize);
 
         // Auto-scroll to results exactly after the browser has completed the next layout reflow and repaint
         requestAnimationFrame(() => {
@@ -240,7 +240,7 @@ async function calculate() {
 }
 
 /* ── Render results ── */
-function renderResults(result, stockLength = 0) {
+function renderResults(result, stockLength = 0, bundleSize = 1) {
     if (!result || !Array.isArray(result.patterns) || result.patterns.length === 0) {
         elements.resultList.innerHTML = `
             <div class="empty-state">
@@ -295,7 +295,7 @@ function renderResults(result, stockLength = 0) {
         // Pattern Header: "Pattern 1 × 198"
         const header = document.createElement("div");
         header.className = "pattern-header";
-        const secondarySuffix = pattern.is_secondary ? ' <small>(cắt cơ)</small>' : '';
+        const secondarySuffix = (bundleSize > 1 && pattern.qty % bundleSize !== 0) ? ' <small>(cắt cơ)</small>' : '';
         header.innerHTML = `<strong>Mẫu cắt ${patternIndex++}${secondarySuffix}</strong> <span class="pattern-qty">× ${pattern.qty}</span>`;
         item.appendChild(header);
 
