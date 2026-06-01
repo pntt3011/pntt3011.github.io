@@ -159,7 +159,7 @@ function buildCuttingDualBadge(plans, optimizedPlans) {
     const beforeBadge = makeSingleWasteBadge(plans, 'Gốc');
     const afterBadge = optimizedPlans
         ? makeSingleWasteBadge(optimizedPlans, 'Tối ưu')
-        : makeLoadingBadge('Tối ưu: đang tính…');
+        : plans.length > 0 ? makeLoadingBadge('Tối ưu: đang tính…') : null;
     if (afterBadge) afterBadge.classList.add('collapsible-waste-badge--optimized', 'collapsible-waste-badge--inactive');
 
     if (beforeBadge) container.appendChild(beforeBadge);

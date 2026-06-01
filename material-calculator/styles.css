@@ -193,7 +193,6 @@ body {
 }
 
 .product-qty-input {
-  width: 56px;
   padding: 4px 6px;
   font-size: 0.82rem;
   font-weight: 700;
@@ -203,7 +202,7 @@ body {
   border-radius: var(--radius-sm);
   background: #f8fafc;
   /* override global input width */
-  width: 56px !important;
+  width: 72px !important;
 }
 
 .product-qty-input:focus {
