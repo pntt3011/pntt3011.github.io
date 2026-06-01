@@ -202,7 +202,7 @@ body {
   border-radius: var(--radius-sm);
   background: #f8fafc;
   /* override global input width */
-  width: 72px !important;
+  width: 64px !important;
 }
 
 .product-qty-input:focus {
@@ -328,6 +328,10 @@ body {
 }
 
 .collapsible-waste-badge--optimized {
+  color: #166534;
+}
+
+.collapsible-waste-badge--ok {
   color: #166534;
 }
 

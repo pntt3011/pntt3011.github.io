@@ -156,7 +156,9 @@ function buildCuttingDualBadge(plans, optimizedPlans) {
     slider.className = 'collapsible-waste-badge-slider';
     container.appendChild(slider);
 
+    const allOk = plans.some(p => p.result) && plans.every(p => !p.result || p.result.percentage_wasted < WASTE_ALERT_PCT);
     const beforeBadge = makeSingleWasteBadge(plans, 'Gốc');
+    if (beforeBadge && allOk) beforeBadge.classList.add('collapsible-waste-badge--ok');
     const afterBadge = optimizedPlans
         ? makeSingleWasteBadge(optimizedPlans, 'Tối ưu')
         : plans.length > 0 ? makeLoadingBadge('Tối ưu: đang tính…') : null;
@@ -184,7 +186,7 @@ function buildCuttingDualBadge(plans, optimizedPlans) {
         const isAfter = view === 'after';
         beforeBadge?.classList.toggle('collapsible-waste-badge--inactive', isAfter);
         afterBadge?.classList.toggle('collapsible-waste-badge--inactive', !isAfter);
-        slider.classList.toggle('collapsible-waste-badge-slider--optimized', isAfter);
+        slider.classList.toggle('collapsible-waste-badge-slider--optimized', isAfter || (!isAfter && allOk));
         positionSlider(isAfter ? afterBadge : beforeBadge);
     }
 
@@ -197,6 +199,7 @@ function buildCuttingDualBadge(plans, optimizedPlans) {
         requestAnimationFrame(() => {
             slider.style.transition = 'none';
             positionSlider(beforeBadge);
+            slider.classList.toggle('collapsible-waste-badge-slider--optimized', allOk);
             requestAnimationFrame(() => { slider.style.transition = ''; });
         });
     }
