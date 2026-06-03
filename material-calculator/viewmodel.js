@@ -223,7 +223,7 @@ function collectMaterialItems(material) {
         quantities.push(Math.trunc(qty));
     }
     const maxInputLength = lengths.length ? Math.max(...lengths) : 0;
-    const maxPatternWaste = Math.max(DEFAULT_MAX_PATTERN_WASTE, Math.ceil(0.99 * maxInputLength));
+    const maxPatternWaste = Math.max(DEFAULT_MAX_PATTERN_WASTE, maxInputLength - 1);
     return { lengths, quantities, maxPatternWaste };
 }
 

@@ -215,7 +215,7 @@ async function calculate() {
 
     const lengths = state.selectedRows.map(row => row.lengthOfDetailCm);
     const maxInputLength = lengths.length ? Math.max(...lengths) : 0;
-    const maxPatternWaste = Math.max(600, Math.ceil(0.99 * maxInputLength));
+    const maxPatternWaste = Math.max(600, maxInputLength - 1);
     const input = {
         lengths,
         quantities: state.selectedRows.map(row => row.qty_needed),
