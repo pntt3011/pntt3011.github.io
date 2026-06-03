@@ -213,11 +213,15 @@ async function calculate() {
     const bundleSize = numberValue(elements.bundleSize) || 10;
     if (!state.computeCuttingPlan || stockLength == null || state.selectedRows.length === 0) return;
 
+    const lengths = state.selectedRows.map(row => row.lengthOfDetailCm);
+    const maxInputLength = lengths.length ? Math.max(...lengths) : 0;
+    const maxPatternWaste = Math.max(600, Math.ceil(0.99 * maxInputLength));
     const input = {
-        lengths: state.selectedRows.map(row => row.lengthOfDetailCm),
+        lengths,
         quantities: state.selectedRows.map(row => row.qty_needed),
         stock_length: stockLength,
-        bundle_size: bundleSize
+        bundle_size: bundleSize,
+        max_pattern_waste: maxPatternWaste,
     };
 
     try {
