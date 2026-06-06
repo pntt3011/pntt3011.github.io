@@ -22,11 +22,14 @@ export function buildViewModel(parsedResult, productConfigs) {
     const { products = [], order_name = null } = parsedResult;
 
     const productItems = products.map(p => {
-        const cfg = productConfigs[p.sheetName] ?? { qty: p.qty ?? 0, enabled: true };
+        const id = p.id ?? p.sheetName;
+        const cfg = productConfigs[id] ?? { qty: p.qty ?? 0, enabled: true };
         return {
             sheetName: p.sheetName,
+            id,
             name: p.name,
             code: p.code,
+            order_name: p.order_name ?? null,
             qty: cfg.qty,
             enabled: cfg.enabled,
         };
@@ -43,7 +46,8 @@ export function buildViewModel(parsedResult, productConfigs) {
 }
 
 function getEnabledQty(product, productConfigs) {
-    const cfg = productConfigs[product.sheetName];
+    const id = product.id ?? product.sheetName;
+    const cfg = productConfigs[id];
     const qty = cfg?.qty ?? product.qty ?? 0;
     return (cfg?.enabled ?? true) && qty > 0 ? qty : 0;
 }

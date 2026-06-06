@@ -40,7 +40,7 @@ function buildProductItem(product, { onToggle, onQtyChange }) {
     checkbox.checked = product.enabled;
     checkbox.addEventListener('change', () => {
         item.classList.toggle('product-item--disabled', !checkbox.checked);
-        onToggle(product.sheetName, checkbox.checked);
+        onToggle(product.id ?? product.sheetName, checkbox.checked);
     });
 
     const info = document.createElement('div');
@@ -52,7 +52,9 @@ function buildProductItem(product, { onToggle, onQtyChange }) {
 
     const metaEl = document.createElement('div');
     metaEl.className = 'product-meta';
-    metaEl.textContent = product.code;
+    metaEl.textContent = product.order_name
+        ? `${product.code} · ${product.order_name}`
+        : product.code;
 
     info.appendChild(nameEl);
     info.appendChild(metaEl);
@@ -73,7 +75,7 @@ function buildProductItem(product, { onToggle, onQtyChange }) {
     qtyInput.addEventListener('change', () => {
         const newQty = Math.max(0, Math.trunc(Number(qtyInput.value) || 0));
         qtyInput.value = newQty;
-        onQtyChange(product.sheetName, newQty);
+        onQtyChange(product.id ?? product.sheetName, newQty);
     });
 
     qtyControl.appendChild(qtyLabel);

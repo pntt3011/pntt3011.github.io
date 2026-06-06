@@ -4,8 +4,6 @@ import * as Render from './view.js';
 
 const state = {
     wasmReady: false,
-    file: null,
-    workbook: null,
     parsedCache: null,
     validation: [],
     productConfigs: {},
@@ -72,7 +70,7 @@ function bindEvents() {
     elements.exportButton.addEventListener('click', exportExcel);
 
     elements.fileInput.addEventListener('change', () => {
-        if (elements.fileInput.files?.[0]) handleFile(elements.fileInput.files[0]);
+        if (elements.fileInput.files?.length) handleFiles(elements.fileInput.files);
     });
 
     elements.dropzone.addEventListener('dragover', event => {
@@ -87,8 +85,8 @@ function bindEvents() {
     elements.dropzone.addEventListener('drop', event => {
         event.preventDefault();
         elements.dropzone.classList.remove('is-dragover');
-        const file = event.dataTransfer?.files?.[0];
-        if (file) handleFile(file);
+        const files = event.dataTransfer?.files;
+        if (files?.length) handleFiles(files);
     });
 
     elements.calculateButton.addEventListener('click', () => {
@@ -97,15 +95,15 @@ function bindEvents() {
     });
 }
 
-async function handleFile(file) {
-    if (!isExcelFile(file)) {
+async function handleFiles(fileList) {
+    const files = Array.from(fileList).filter(isExcelFile);
+
+    if (!files.length) {
         Render.setStatus(elements.appStatus, 'error', 'File không hợp lệ');
         Render.renderErrorState('Vui lòng chọn file Excel có phần mở rộng .xlsx, .xls hoặc .xlsm.');
         return;
     }
 
-    state.file = file;
-    state.workbook = null;
     state.parsedCache = null;
     state.validation = [];
     state.productConfigs = {};
@@ -120,14 +118,20 @@ async function handleFile(file) {
 
     try {
         if (!window.XLSX) throw new Error('SheetJS XLSX is not available.');
-        const buffer = await file.arrayBuffer();
-        state.workbook = window.XLSX.read(buffer, { type: 'array', cellDates: false });
 
-        state.parsedCache = window.BomParser.parseWorkbook(state.workbook, { includeValidation: true });
+        const parsedResults = [];
+        for (let i = 0; i < files.length; i++) {
+            const buffer = await files[i].arrayBuffer();
+            const workbook = window.XLSX.read(buffer, { type: 'array', cellDates: false });
+            const result = window.BomParser.parseWorkbook(workbook, { includeValidation: true });
+            parsedResults.push({ result, fileIndex: i });
+        }
+
+        state.parsedCache = mergeResults(parsedResults);
         state.validation = state.parsedCache.validation ?? [];
 
         for (const product of state.parsedCache.products) {
-            state.productConfigs[product.sheetName] = { qty: product.qty ?? 0, enabled: true };
+            state.productConfigs[product.id] = { qty: product.qty ?? 0, enabled: true };
         }
 
         runCalculation();
@@ -139,6 +143,32 @@ async function handleFile(file) {
     }
 }
 
+function mergeResults(parsedResults) {
+    const allProducts = [];
+    const allValidation = [];
+    const orderNames = [];
+
+    for (const { result, fileIndex } of parsedResults) {
+        const orderName = result.order_name ?? null;
+        if (orderName) orderNames.push(orderName);
+
+        for (const product of result.products) {
+            const id = orderName
+                ? `${orderName}::${product.sheetName}`
+                : `${fileIndex}::${product.sheetName}`;
+            allProducts.push({ ...product, id, order_name: orderName });
+        }
+
+        if (result.validation) allValidation.push(...result.validation);
+    }
+
+    return {
+        order_name: orderNames.join(', ') || null,
+        products: allProducts,
+        validation: allValidation,
+    };
+}
+
 function runCalculation() {
     if (!state.parsedCache) return;
 
@@ -146,13 +176,13 @@ function runCalculation() {
     state.viewModel = buildViewModel(state.parsedCache, state.productConfigs);
 
     Render.renderProducts(state.viewModel.products, {
-        onToggle: (sheetName, enabled) => {
-            const cfg = state.productConfigs[sheetName] ?? { qty: 0, enabled: true };
-            state.productConfigs[sheetName] = { ...cfg, enabled };
+        onToggle: (id, enabled) => {
+            const cfg = state.productConfigs[id] ?? { qty: 0, enabled: true };
+            state.productConfigs[id] = { ...cfg, enabled };
         },
-        onQtyChange: (sheetName, qty) => {
-            const cfg = state.productConfigs[sheetName] ?? { qty: 0, enabled: true };
-            state.productConfigs[sheetName] = { ...cfg, qty };
+        onQtyChange: (id, qty) => {
+            const cfg = state.productConfigs[id] ?? { qty: 0, enabled: true };
+            state.productConfigs[id] = { ...cfg, qty };
         },
     });
 
