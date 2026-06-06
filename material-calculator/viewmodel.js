@@ -1,10 +1,5 @@
 // viewmodel.js — aggregate model.js output into render-ready data
 
-import {
-    compute_cutting_plan_numeric,
-    compute_optimal_stock_cutting_plan_numeric,
-} from '../shared/lib/pkg/steel_cutting_wasm.js';
-
 const STOCK_LENGTH = 5950;
 const STOCK_DISPLAY_OFFSET = 50;
 const DEFAULT_MAX_PATTERN_WASTE = 600;
@@ -182,10 +177,10 @@ function aggregateCuttingPlan(products, productConfigs) {
 
                 const existing = group.usageMap.get(part.length);
                 if (!existing) {
-                    group.usageMap.set(part.length, { qty: totalQty, productCodes: new Set([product.code]) });
+                    group.usageMap.set(part.length, { qty: totalQty, productCodes: new Map([[product.code, product.order_name ?? null]]) });
                 } else {
                     existing.qty += totalQty;
-                    existing.productCodes.add(product.code);
+                    existing.productCodes.set(product.code, product.order_name ?? null);
                 }
             }
         }
@@ -202,7 +197,7 @@ function aggregateCuttingPlan(products, productConfigs) {
             usage: Array.from(item.usageMap.entries())
                 .sort(([a], [b]) => a - b)
                 .map(([length, { qty, productCodes }]) => ({
-                    length, qty, productCodes: Array.from(productCodes),
+                    length, qty, productCodes: Array.from(productCodes.entries()).map(([code, order_name]) => ({ code, order_name })),
                 })),
         }))
         .sort((a, b) => {
@@ -242,44 +237,6 @@ function computeMaterialPlan(material) {
         max_pattern_waste: maxPatternWaste,
     };
 
-    let result = null;
-    let error = null;
-
-    if (!lengths.length) {
-        error = 'Không có chi tiết hợp lệ.';
-    } else {
-        try {
-            result = compute_cutting_plan_numeric(input);
-        } catch (caught) {
-            error = caught?.message || String(caught);
-        }
-    }
-
-    return {
-        material,
-        input,
-        displayStockLength: STOCK_LENGTH + STOCK_DISPLAY_OFFSET,
-        result,
-        error,
-        sourceCount: material.usage.length,
-        requiredTotal: quantities.reduce((sum, q) => sum + q, 0),
-    };
-}
-
-export function computeOptimalMaterialPlan(material) {
-    const { lengths, quantities, maxPatternWaste } = collectMaterialItems(material);
-
-    if (!lengths.length) {
-        return {
-            material,
-            input: { lengths, quantities, stock_length: STOCK_LENGTH, bundle_size: 1, max_pattern_waste: maxPatternWaste },
-            result: null,
-            error: 'Không có chi tiết hợp lệ.',
-            sourceCount: material.usage.length,
-            requiredTotal: 0,
-        };
-    }
-
     const optInput = {
         lengths,
         quantities,
@@ -295,31 +252,15 @@ export function computeOptimalMaterialPlan(material) {
         include_combination_candidates: OPT_INCLUDE_COMBINATION_CANDIDATES,
     };
 
-    let result = null;
-    let error = null;
-    let bestStockLength = STOCK_LENGTH;
-
-    try {
-        const optResult = compute_optimal_stock_cutting_plan_numeric(optInput);
-        result = optResult.best_result;
-        bestStockLength = optResult.best_stock_length;
-    } catch (caught) {
-        error = caught?.message || String(caught);
-    }
-
     return {
         material,
-        input: {
-            lengths,
-            quantities,
-            stock_length: bestStockLength,
-            bundle_size: 1,
-            max_pattern_waste: maxPatternWaste,
-        },
-        displayStockLength: bestStockLength + STOCK_DISPLAY_OFFSET,
-        result,
-        error,
+        input,
+        optInput,
+        displayStockLength: STOCK_LENGTH + STOCK_DISPLAY_OFFSET,
+        result: null,
+        error: lengths.length ? null : 'Không có chi tiết hợp lệ.',
         sourceCount: material.usage.length,
         requiredTotal: quantities.reduce((sum, q) => sum + q, 0),
     };
 }
+

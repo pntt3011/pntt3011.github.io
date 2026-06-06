@@ -53,7 +53,7 @@ function buildProductItem(product, { onToggle, onQtyChange }) {
     const metaEl = document.createElement('div');
     metaEl.className = 'product-meta';
     metaEl.textContent = product.order_name
-        ? `${product.code} · ${product.order_name}`
+        ? `${product.code} (${formatOrderName(product.order_name)})`
         : product.code;
 
     info.appendChild(nameEl);
@@ -93,9 +93,7 @@ export function renderResults(viewModel, { onExportEnabled }) {
     const { order_name, plans, optimizedPlans, powderCoating, woodPainting, steelWeight, steelArea, woodArea, woodVolume } = viewModel;
 
     if (el.resultsPanelTitle) {
-        el.resultsPanelTitle.textContent = order_name
-            ? `Thông tin lệnh sản xuất ${order_name}`
-            : 'Thông tin lệnh sản xuất';
+        el.resultsPanelTitle.textContent = 'Thông tin lệnh sản xuất';
     }
 
     el.resultsList.innerHTML = '';
@@ -300,7 +298,9 @@ function buildCuttingPlansContent(body, plans, optimizedPlans, setActiveView) {
     const afterSection = document.createElement('div');
     afterSection.hidden = true;
     if (optimizedPlans) {
-        buildCuttingPlanList(afterSection, optimizedPlans);
+        const readyPlans = optimizedPlans.filter(Boolean);
+        if (readyPlans.length) buildCuttingPlanList(afterSection, readyPlans);
+        if (optimizedPlans.some(p => p === null)) afterSection.appendChild(buildOptimizingState());
     } else {
         afterSection.appendChild(buildOptimizingState());
     }
@@ -335,6 +335,8 @@ function buildCuttingPlanList(container, plans) {
         bodyEl.appendChild(buildSourceBlock(plan));
         if (plan.error) {
             bodyEl.appendChild(buildErrorBlock(plan.error));
+        } else if (!plan.result) {
+            bodyEl.appendChild(buildLoadingBlock());
         } else {
             bodyEl.appendChild(buildPatternBlock(plan, isAlert));
         }
@@ -371,6 +373,11 @@ function buildSummaryBadges(plan, isAlert) {
 
     if (plan.error) {
         badges.textContent = plan.error;
+    } else if (!plan.result) {
+        const badge = document.createElement('span');
+        badge.className = 'waste-badge waste-badge--loading';
+        badge.textContent = 'đang tính…';
+        badges.appendChild(badge);
     } else {
         const stockQty = document.createElement('strong');
         stockQty.className = 'summary-number';
@@ -449,10 +456,12 @@ function buildPatternBlock(plan, materialIsAlert = false) {
             : 0;
         const patternAlert = materialIsAlert && patternWastePct >= WASTE_ALERT_PCT;
 
-        const patternCodes = new Set();
+        const patternCodes = new Map();
         lengths.forEach((length, i) => {
             if (Number(pattern.counts?.[i] || 0) > 0) {
-                (lengthToProductCodes.get(Number(length)) || []).forEach(c => patternCodes.add(c));
+                (lengthToProductCodes.get(Number(length)) || []).forEach(({ code, order_name }) => {
+                    if (!patternCodes.has(code)) patternCodes.set(code, order_name);
+                });
             }
         });
 
@@ -464,7 +473,9 @@ function buildPatternBlock(plan, materialIsAlert = false) {
 
         const name = document.createElement('div');
         name.className = 'pattern-name';
-        name.textContent = Array.from(patternCodes).join(' · ') || '—';
+        name.textContent = Array.from(patternCodes.entries())
+            .map(([code, order_name]) => order_name ? `${code} (${formatOrderName(order_name)})` : code)
+            .join(' · ') || '—';
 
         const meta = document.createElement('div');
         meta.className = 'pattern-meta';
@@ -595,6 +606,18 @@ function buildErrorBlock(message) {
     return wrapper;
 }
 
+function buildLoadingBlock() {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'optimizing-state';
+    wrapper.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+        </svg>
+        <span>Đang tính toán kế hoạch cắt…</span>`;
+    return wrapper;
+}
+
 export function setStatus(element, kind, text) {
     element.className = `status-pill status-pill--${kind}`;
     element.textContent = text;
@@ -631,6 +654,12 @@ export function materialLabel(material) {
     const cut = material?.cut || null;
     const parts = [type, shape, dim, thickness, cut].filter(Boolean);
     return (parts.length ? parts.join(' · ') : 'Vật liệu').toLocaleLowerCase('vi');
+}
+
+function formatOrderName(order_name) {
+    if (!order_name) return order_name;
+    const m = order_name.match(/^(\d+\/\d+)/);
+    return "LSX " + (m ? m[1] : order_name);
 }
 
 function numberOrNull(value) {

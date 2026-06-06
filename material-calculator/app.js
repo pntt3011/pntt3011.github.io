@@ -1,6 +1,9 @@
-import initWasm from '../shared/lib/pkg/steel_cutting_wasm.js';
-import { buildViewModel, computeOptimalMaterialPlan } from './viewmodel.js';
+import { buildViewModel } from './viewmodel.js';
 import * as Render from './view.js';
+
+let wasmWorker = null;
+
+const STOCK_DISPLAY_OFFSET = 50;
 
 const state = {
     wasmReady: false,
@@ -8,6 +11,7 @@ const state = {
     validation: [],
     productConfigs: {},
     viewModel: null,
+    pendingPlans: 0,
 };
 
 const elements = {};
@@ -39,7 +43,16 @@ function cacheElements() {
 
 async function init() {
     try {
-        await initWasm();
+        wasmWorker = new Worker(new URL('./wasm-worker.js', import.meta.url), { type: 'module' });
+        await new Promise((resolve, reject) => {
+            wasmWorker.onmessage = ({ data }) => {
+                if (data.type === 'ready') resolve();
+                else if (data.type === 'initError') reject(new Error(data.message));
+            };
+            wasmWorker.onerror = err => reject(new Error(err.message));
+        });
+        wasmWorker.onmessage = handleWorkerMessage;
+        wasmWorker.onerror = handleWorkerError;
         state.wasmReady = true;
         Render.setStatus(elements.appStatus, 'ready', 'Sẵn sàng');
         setExportEnabled(false);
@@ -173,7 +186,10 @@ function runCalculation() {
     if (!state.parsedCache) return;
 
     state.optimizationId = (state.optimizationId ?? 0) + 1;
+    const runId = state.optimizationId;
+
     state.viewModel = buildViewModel(state.parsedCache, state.productConfigs);
+    state.viewModel.optimizedPlans = null;
 
     Render.renderProducts(state.viewModel.products, {
         onToggle: (id, enabled) => {
@@ -189,7 +205,14 @@ function runCalculation() {
     Render.renderResults(state.viewModel, { onExportEnabled: setExportEnabled });
     elements.calculateButton.disabled = false;
 
-    scheduleOptimization(state.optimizationId);
+    const plans = state.viewModel.plans;
+    state.pendingPlans = 0;
+    for (let i = 0; i < plans.length; i++) {
+        if (!plans[i].input.lengths.length) continue;
+        state.pendingPlans++;
+        wasmWorker.postMessage({ type: 'computePlan', runId, index: i, input: plans[i].input });
+    }
+    if (state.pendingPlans === 0) checkStartOptimization(runId);
 }
 
 const WASTE_ALERT_PCT = 1.0;
@@ -198,33 +221,56 @@ function needsOptimization(plan) {
     return !plan.error && plan.result?.percentage_wasted >= WASTE_ALERT_PCT;
 }
 
-function scheduleOptimization(id) {
+function handleWorkerMessage({ data }) {
+    const { type, runId, index } = data;
+    if (runId !== state.optimizationId) return;
+
+    if (type === 'planResult') {
+        state.viewModel.plans[index] = {
+            ...state.viewModel.plans[index],
+            result: data.result,
+            error: data.error ?? state.viewModel.plans[index].error,
+        };
+        state.pendingPlans--;
+        Render.refreshCuttingSection(state.viewModel);
+        if (state.pendingPlans === 0) checkStartOptimization(runId);
+
+    } else if (type === 'optimalPlanResult') {
+        const basePlan = state.viewModel.plans[index];
+        const bestStockLength = data.optResult?.best_stock_length ?? basePlan.input.stock_length;
+        state.viewModel.optimizedPlans[index] = {
+            ...basePlan,
+            input: { ...basePlan.input, stock_length: bestStockLength },
+            displayStockLength: bestStockLength + STOCK_DISPLAY_OFFSET,
+            result: data.optResult?.best_result ?? null,
+            error: data.error ?? null,
+        };
+        Render.refreshCuttingSection(state.viewModel);
+    }
+}
+
+function handleWorkerError(err) {
+    console.error('Worker crashed:', err);
+    Render.setStatus(elements.appStatus, 'error', 'Lỗi tính toán');
+    Render.renderErrorState('Bộ tính toán gặp lỗi. Vui lòng tải lại trang.', err?.message || String(err));
+}
+
+function checkStartOptimization(runId) {
+    if (runId !== state.optimizationId) return;
     const plans = state.viewModel?.plans;
     if (!plans?.length) return;
 
     const optimizedPlans = new Array(plans.length).fill(null);
-    let index = 0;
+    state.viewModel.optimizedPlans = optimizedPlans;
 
-    function step() {
-        // Abort if a newer calculation has started.
-        if (id !== state.optimizationId) return;
-
-        if (index >= plans.length) {
-            state.viewModel = { ...state.viewModel, optimizedPlans };
-            Render.refreshCuttingSection(state.viewModel);
-            return;
+    for (let i = 0; i < plans.length; i++) {
+        if (needsOptimization(plans[i])) {
+            wasmWorker.postMessage({ type: 'computeOptimalPlan', runId, index: i, optInput: plans[i].optInput });
+        } else {
+            optimizedPlans[i] = plans[i];
         }
-
-        const plan = plans[index];
-        // Only run the optimizer for red-alert materials; reuse the original plan otherwise.
-        optimizedPlans[index] = needsOptimization(plan)
-            ? computeOptimalMaterialPlan(plan.material)
-            : plan;
-        index++;
-        setTimeout(step, 0);
     }
-
-    setTimeout(step, 0);
+    Render.refreshCuttingSection(state.viewModel);
 }
 
 // ── Excel export ───────────────────────────────────────────────────────────────
