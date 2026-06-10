@@ -20,7 +20,7 @@ const CD_STEPS = [
   'XL màu gỗ', 'XL lông gỗ', 'Chà Bo', 'Nhám chổi', 'Bắn sò',
   'Ráp cụm', 'Nhám thùng cụm', 'Ráp tổng', 'Chạy rãnh', 'Mài đĩa',
   'Nguội (Dầu màu)', 'Nguội (Glaze)', 'Nguội (Pigment)', 'Nguội (Nước)',
-  'Sơn Dầu màu', 'Sơn Glaze', 'Sơn Pigment', 'Sơn Nước',
+  'Sơn (Dầu màu)', 'Sơn (Glaze)', 'Sơn (Pigment)', 'Sơn (Nước)',
   'Đan wicker', 'Đan dây dù',
 ];
 
