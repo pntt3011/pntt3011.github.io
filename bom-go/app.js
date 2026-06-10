@@ -1,30 +1,114 @@
 // ── Constants ────────────────────────────────────────────────────────────────
 const STEP_WIDTH = 5;
-const NUM_STEPS = 25;
 const DEFAULT_DATA_START_ROW = 19;
 
+// Updated step names
 const CD_STEPS = [
-  'Cắt ngang', 'Rong dọc', 'Vẽ rập', 'Lọng cong', 'Sấy 2QT',
-  'Bào ghép 2M', 'Bào ghép 4M', 'Ghép finger', 'Ghép cao tầng', 'Ghép cảo',
-  'Bào 2M', 'Tiện tròn', 'Tubi CNC', 'Tubi chép hình', 'Tubi tay',
-  'Chà láng', 'Chuốt chốt', 'Bào 4M',
-  '3D chống tâm', '3D kẹp lật',
-  'Cắt tay (TC)', 'Cắt thẳng', 'Cắt xéo', 'Cắt router', 'Cắt finger',
-  'CNC (+) 6 dao', 'CNC (+) 2 dao', 'CNC (+) 1 dao',
-  'Đục CNC', 'Đục lắc', 'Khoan lỗ LR', 'Khoan lỗ vít', 'Khoan lỗ sò',
-  'Khoan lỗ tán bolt', 'Khoan lỗ tán dù', 'Khoan lỗ ngang', 'Khoan lỗ dọc',
-  'Bo R', 'Vát góc', 'Soi rãnh', 'Cẩn ngàm', 'Khoét lỗ dù',
-  'XLKT Putty', 'XLKT Epoxy', 'XLKT Vá gỗ', 'Quay bọ',
-  'Nhám thùng 1M', 'Nhám thùng 2M', 'Nhám thùng 3M', 'Nhám thùng 4M', 'Nhám cong',
-  'Ép cước', 'Cào xước', 'Cào tay', 'Bắn cát',
-  'XL màu gỗ', 'XL lông gỗ', 'Chà Bo', 'Nhám chổi', 'Bắn sò',
-  'Ráp cụm', 'Nhám thùng cụm', 'Ráp tổng', 'Chạy rãnh', 'Mài đĩa',
-  'Nguội (Dầu màu)', 'Nguội (Glaze)', 'Nguội (Pigment)', 'Nguội (Nước)',
-  'Sơn (Dầu màu)', 'Sơn (Glaze)', 'Sơn (Pigment)', 'Sơn (Nước)',
-  'Đan wicker', 'Đan dây dù',
+  'Cắt ngang',
+  'Rong dọc',
+  'Vẽ rập',
+  'Lọng cong',
+  'Sấy 2QT',
+
+  'Bào ghép 2M',
+  'Bào ghép 4M',
+  'Ghép finger',
+  'Ghép cao tầng',
+  'Ghép cảo',
+
+  'Bào 2M',
+  'Tiện tròn',
+  'Tubi CNC',
+  'Tubi chép hình',
+  'Tubi tay',
+
+  'Chà láng',
+  'Chuốt chốt',
+  'Bào 4M',
+
+  'XLKT Putty',
+  'XLKT Epoxy',
+  'XLKT Vá gỗ',
+
+  'Cắt tay (TC)',
+  'Cắt thẳng',
+  'Cắt xéo',
+  'Cắt router',
+  'Cắt finger',
+
+  'CNC (+) 6 dao',
+  'CNC (+) 2 dao',
+  'CNC (+) 1 dao',
+
+  '3D chống tâm',
+  '3D kẹp lật',
+
+  'Bo R',
+  'Vát góc',
+  'Soi rãnh',
+  'Cẩn ngàm',
+  'Khoét lỗ dù',
+
+  'Đục CNC',
+  'Đục lắc',
+
+  'Khoan lỗ LR',
+  'Khoan lỗ vít',
+  'Khoan lỗ sò',
+  'Khoan lỗ tán bolt',
+  'Khoan lỗ tán dù',
+  'Khoan lỗ ngang',
+  'Khoan lỗ dọc',
+
+  'Quay bọ',
+
+  'Nhám thùng 1M',
+  'Nhám thùng 2M',
+  'Nhám thùng 3M',
+  'Nhám thùng 4M',
+  'Nhám cong',
+
+  'Ép cước',
+  'Cào xước',
+  'Cào tay',
+  'Bắn cát',
+
+  'XL màu gỗ',
+  'XL lông gỗ',
+  'Chà Bo',
+  'Nhám chổi',
+  'Bắn sò',
+
+  'Ráp cụm',
+  'Nhám thùng cụm',
+  'Ráp tổng',
+  'Chạy rãnh',
+  'Chà đĩa',
+
+  'Nguội (Dầu màu)',
+  'Nguội (Glaze)',
+  'Nguội (Pigment)',
+  'Nguội (Nước)',
+
+  'Sơn (Dầu màu)',
+  'Sơn (Glaze)',
+  'Sơn (Pigment)',
+  'Sơn (Nước)',
+
+  'Đan wicker',
+  'Đan dây dù'
 ];
 
-const CD_STEP_COL = Object.fromEntries(CD_STEPS.map((name, i) => [name, i + 5]));
+function normalizeStepName(s) {
+  return String(s ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+const CD_STEP_COL = Object.fromEntries(
+  CD_STEPS.map((name, i) => [normalizeStepName(name), i + 5])
+);
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const dropZone = document.getElementById('dropZone');
@@ -37,7 +121,6 @@ const statusMsg = document.getElementById('statusMsg');
 let workbook = null;
 
 // ── File loading ─────────────────────────────────────────────────────────────
-
 function loadFile(file) {
   if (!file) return;
 
@@ -50,7 +133,8 @@ function loadFile(file) {
       fileName.textContent = file.name;
       dropZone.classList.add('has-file');
       setStatus('');
-    } catch {
+    } catch (err) {
+      console.error(err);
       setStatus('Failed to read file.', 'error');
     }
   };
@@ -73,7 +157,6 @@ function populateSheets(names) {
 }
 
 // ── Drag & drop ──────────────────────────────────────────────────────────────
-
 dropZone.addEventListener('dragover', (e) => {
   e.preventDefault();
   dropZone.classList.add('drag-over');
@@ -96,7 +179,6 @@ fileInput.addEventListener('change', () => {
 });
 
 // ── Parse button ─────────────────────────────────────────────────────────────
-
 parseBtn.addEventListener('click', () => {
   if (!workbook) return;
 
@@ -107,7 +189,7 @@ parseBtn.addEventListener('click', () => {
     const srcSheet = workbook.Sheets[sheetSelect.value];
     const rows = XLSX.utils.sheet_to_json(srcSheet, {
       header: 1,
-      defval: null,
+      defval: null
     });
 
     const prod = parseProduct(rows);
@@ -128,12 +210,9 @@ parseBtn.addEventListener('click', () => {
 });
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
 function fmtCode(v) {
   if (v == null || v === '') return null;
-  if (typeof v === 'number' && Math.floor(v) === v) {
-    return String(Math.floor(v));
-  }
+  if (typeof v === 'number' && Math.floor(v) === v) return String(Math.floor(v));
   return String(v).trim();
 }
 
@@ -150,7 +229,7 @@ function cellText(v) {
     .trim();
 }
 
-function findCell(rows, predicate, maxRows = 80, maxCols = 120) {
+function findCell(rows, predicate, maxRows = 100, maxCols = 250) {
   for (let r = 0; r < Math.min(rows.length, maxRows); r++) {
     const row = rows[r] ?? [];
 
@@ -164,13 +243,14 @@ function findCell(rows, predicate, maxRows = 80, maxCols = 120) {
   return null;
 }
 
-function valueRightOfLabel(rows, labels, maxRows = 80, maxCols = 40) {
-  const labelList = Array.isArray(labels) ? labels : [labels];
-  const targets = labelList.map(normText);
+function valueRightOfLabel(rows, labels, maxRows = 100, maxCols = 80) {
+  if (!Array.isArray(labels)) labels = [labels];
+
+  const labelSet = labels.map(normText);
 
   const hit = findCell(
     rows,
-    v => targets.includes(normText(v)),
+    v => labelSet.includes(normText(v)),
     maxRows,
     maxCols
   );
@@ -180,12 +260,23 @@ function valueRightOfLabel(rows, labels, maxRows = 80, maxCols = 40) {
   const row = rows[hit.r] ?? [];
 
   for (let c = hit.c + 1; c < Math.min(row.length, hit.c + 10); c++) {
-    if (row[c] != null && row[c] !== '') {
-      return row[c];
-    }
+    if (row[c] != null && row[c] !== '') return row[c];
   }
 
   return null;
+}
+
+// ── Product parser ──────────────────────────────────────────────────────────
+function parseProduct(rows) {
+  const [dai, rong, cao] = findDimensionValues(rows);
+
+  return {
+    name: valueRightOfLabel(rows, ['Product :', 'Product:']),
+    code: valueRightOfLabel(rows, ['Item Code:', 'Item Code :']),
+    dai,
+    rong,
+    cao
+  };
 }
 
 function findDimensionValues(rows) {
@@ -195,8 +286,8 @@ function findDimensionValues(rows) {
       const t = normText(v);
       return t.startsWith('dimention') || t.startsWith('dimension');
     },
-    80,
-    40
+    100,
+    80
   );
 
   if (!hit) return [null, null, null];
@@ -217,81 +308,11 @@ function findDimensionValues(rows) {
   return [
     values[0] ?? null,
     values[1] ?? null,
-    values[2] ?? null,
+    values[2] ?? null
   ];
 }
 
-// ── Source-sheet parsers ─────────────────────────────────────────────────────
-
-function parseProduct(rows) {
-  const [dai, rong, cao] = findDimensionValues(rows);
-
-  return {
-    name: valueRightOfLabel(rows, ['Product:', 'Product :', 'Tên SP:', 'Tên SP :']),
-    code: valueRightOfLabel(rows, ['Item Code:', 'Item Code :', 'Mã SP:', 'Mã SP :']),
-    dai,
-    rong,
-    cao,
-  };
-}
-
-function parseParts(rows) {
-  const parts = [];
-  const layout = detectLayout(rows);
-
-  const startRow = layout.dataStartRow;
-  const stepStartCol = layout.stepStartCol;
-  const codeCol = layout.ttCol;
-
-  if (stepStartCol < 0) {
-    throw new Error('Could not detect first step column.');
-  }
-
-  for (let r = startRow - 1; r < rows.length; r++) {
-    const row = rows[r] ?? [];
-    const name = row[1];
-
-    if (name == null || name === '') continue;
-
-    const code = fmtCode(row[codeCol]);
-
-    const steps = [];
-
-    for (let s = 0; s < NUM_STEPS; s++) {
-      const cs = stepStartCol + s * STEP_WIDTH;
-
-      const sname = row[cs];
-      const stime = row[cs + 4];
-
-      if (
-        sname &&
-        typeof sname === 'string' &&
-        stime != null &&
-        typeof stime !== 'string'
-      ) {
-        steps.push([sname.trim(), stime]);
-      }
-    }
-
-    parts.push({
-      loai: row[0] == null ? 'Cụm' : 'Chi Tiết',
-      code,
-      name,
-      sl: row[2],
-      day_tho: row[3],
-      rong_tho: row[4],
-      dai_tho: row[5],
-      dai_tinh: row[8],
-      khoi: row[10],
-      dt_bm: row[11],
-      ghi_chu: row[13],
-      steps,
-    });
-  }
-
-  return parts;
-}
-
+// ── Layout detection ────────────────────────────────────────────────────────
 function detectLayout(rows) {
   const dataStartRow = findDataStartRow(rows);
   const headerRowIdx = Math.max(0, dataStartRow - 2);
@@ -310,7 +331,7 @@ function detectLayout(rows) {
 
   if (stepStartCol < 0) {
     outer:
-    for (let r = 0; r < Math.min(rows.length, 35); r++) {
+    for (let r = 0; r < Math.min(rows.length, 40); r++) {
       const row = rows[r] ?? [];
 
       for (let c = 0; c < row.length; c++) {
@@ -322,10 +343,14 @@ function detectLayout(rows) {
     }
   }
 
+  if (stepStartCol < 0) {
+    throw new Error('Could not detect first step column.');
+  }
+
   return {
     dataStartRow,
     ttCol,
-    stepStartCol,
+    stepStartCol
   };
 }
 
@@ -345,8 +370,8 @@ function findDataStartRow(rows) {
   }
 
   if (headerRow >= 0) {
-    for (let r = headerRow + 1; r < Math.min(rows.length, headerRow + 10); r++) {
-      if (Number(rows[r]?.[0]) === 1) {
+    for (let r = headerRow + 1; r < Math.min(rows.length, headerRow + 20); r++) {
+      if (Number(rows[r]?.[0]) === 1 && rows[r]?.[1] != null) {
         return r + 1;
       }
     }
@@ -361,8 +386,63 @@ function findDataStartRow(rows) {
   return DEFAULT_DATA_START_ROW;
 }
 
-// ── Workbook factory ─────────────────────────────────────────────────────────
+// ── Parts parser ────────────────────────────────────────────────────────────
+function parseParts(rows) {
+  const parts = [];
+  const layout = detectLayout(rows);
 
+  const startRow = layout.dataStartRow;
+  const stepStartCol = layout.stepStartCol;
+  const codeCol = layout.ttCol;
+
+  for (let r = startRow - 1; r < rows.length; r++) {
+    const row = rows[r] ?? [];
+    const name = row[1];
+
+    if (name == null || name === '') continue;
+
+    const code = codeCol >= 0 ? fmtCode(row[codeCol]) : null;
+    const steps = [];
+
+    // IMPORTANT:
+    // no fixed NUM_STEPS limit.
+    // This reaches far columns like FC in sheet 3A (2).
+    for (let cs = stepStartCol; cs < row.length; cs += STEP_WIDTH) {
+      const sname = row[cs];
+      const stime = row[cs + 4];
+
+      if (
+        sname &&
+        typeof sname === 'string' &&
+        stime != null &&
+        stime !== ''
+      ) {
+        steps.push([sname.trim(), stime]);
+      }
+    }
+
+    parts.push({
+      loai: row[0] == null ? 'Cụm' : 'Chi Tiết',
+      code,
+      name,
+
+      sl: row[2],
+      day_tho: row[3],
+      rong_tho: row[4],
+      dai_tho: row[5],
+      dai_tinh: row[8],
+      khoi: row[10],
+      dt_bm: row[11],
+      ghi_chu: row[13],
+
+      steps
+    });
+  }
+
+  return parts;
+}
+
+// ── Workbook factory ────────────────────────────────────────────────────────
 function createWorkbook() {
   const wb = XLSX.utils.book_new();
 
@@ -373,11 +453,21 @@ function createWorkbook() {
     [],
     [],
     [
-      'Tên', 'Mã', 'Mô Tả', 'Loại', 'Số Lượng',
-      'Dia/rộng hộp', 'Dia/dài hộp', 'Dài chi tiết',
-      'Dày Phôi', 'loại khung', 'Loại Phôi',
-      'Khối lượng', 'Diện tích bề mặt', 'KLR',
-    ],
+      'Tên',
+      'Mã',
+      'Mô Tả',
+      'Loại',
+      'Số Lượng',
+      'Dia/rộng hộp',
+      'Dia/dài hộp',
+      'Dài chi tiết',
+      'Dày Phôi',
+      'loại khung',
+      'Loại Phôi',
+      'Khối lượng',
+      'Diện tích bề mặt',
+      'KLR'
+    ]
   ];
 
   XLSX.utils.book_append_sheet(
@@ -394,7 +484,7 @@ function createWorkbook() {
     [],
     ['CUST:'],
     ['Tên SP:'],
-    cdRow6,
+    cdRow6
   ];
 
   XLSX.utils.book_append_sheet(
@@ -406,8 +496,7 @@ function createWorkbook() {
   return wb;
 }
 
-// ── Sheet fillers ────────────────────────────────────────────────────────────
-
+// ── Sheet fillers ───────────────────────────────────────────────────────────
 function fillBom(ws, prod, parts) {
   setCell(ws, 2, 1, prod.name);
   setCell(ws, 2, 2, prod.code);
@@ -455,9 +544,10 @@ function fillBomCongDoan(ws, prod, parts) {
     setCell(ws, wr, 2, p.name);
     setCell(ws, wr, 3, p.code);
 
-    const total = p.steps.length;
+    const validSteps = p.steps.filter(([sname]) => lookupStep(sname));
+    const total = validSteps.length;
 
-    p.steps.forEach(([sname, stime], idx) => {
+    validSteps.forEach(([sname, stime], idx) => {
       const order = idx + 1;
       const isLast = order === total ? 1 : 0;
 
@@ -474,28 +564,16 @@ function fillBomCongDoan(ws, prod, parts) {
   }
 }
 
+// ── Step lookup ─────────────────────────────────────────────────────────────
 function lookupStep(sname) {
-  let col = CD_STEP_COL[sname];
-
-  if (col) return col;
-
-  const lower = String(sname ?? '').toLowerCase().trim();
-
-  for (const [k, v] of Object.entries(CD_STEP_COL)) {
-    if (k.toLowerCase() === lower) {
-      return v;
-    }
-  }
-
-  return null;
+  return CD_STEP_COL[normalizeStepName(sname)] ?? null;
 }
 
-// ── Low-level cell writer ────────────────────────────────────────────────────
-
+// ── Low-level cell writer ───────────────────────────────────────────────────
 function setCell(ws, r1, c1, value) {
   const addr = XLSX.utils.encode_cell({
     r: r1 - 1,
-    c: c1 - 1,
+    c: c1 - 1
   });
 
   if (value == null || value === '') {
@@ -505,7 +583,7 @@ function setCell(ws, r1, c1, value) {
 
   ws[addr] = {
     v: value,
-    t: typeof value === 'number' ? 'n' : 's',
+    t: typeof value === 'number' ? 'n' : 's'
   };
 
   const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
@@ -516,8 +594,7 @@ function setCell(ws, r1, c1, value) {
   ws['!ref'] = XLSX.utils.encode_range(range);
 }
 
-// ── Status helper ────────────────────────────────────────────────────────────
-
+// ── Status helper ───────────────────────────────────────────────────────────
 function setStatus(text, type = '') {
   statusMsg.textContent = text;
   statusMsg.className = 'status-msg' + (type ? ' ' + type : '');
