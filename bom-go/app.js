@@ -193,7 +193,7 @@ parseBtn.addEventListener('click', () => {
     });
 
     const prod = parseProduct(rows);
-    const parts = parseParts(rows);
+    const parts = parseParts(rows, srcSheet);
     const wb = createWorkbook();
 
     fillBom(wb.Sheets['bom'], prod, parts);
@@ -387,7 +387,7 @@ function findDataStartRow(rows) {
 }
 
 // ── Parts parser ────────────────────────────────────────────────────────────
-function parseParts(rows) {
+function parseParts(rows, srcSheet) {
   const parts = [];
   const layout = detectLayout(rows);
 
@@ -427,7 +427,7 @@ function parseParts(rows) {
       name,
 
       sl: row[2],
-      day_tho: row[9],
+      day_tho: getDisplayCellValue(srcSheet, r + 1, 10),
       rong_tho: row[7],
       dai_tho: row[6],
       dai_tinh: row[8],
@@ -440,6 +440,14 @@ function parseParts(rows) {
   }
 
   return parts;
+}
+
+function getDisplayCellValue(ws, r1, c1) {
+  const cell = ws?.[XLSX.utils.encode_cell({ r: r1 - 1, c: c1 - 1 })];
+
+  if (!cell) return null;
+
+  return cell.w ?? XLSX.utils.format_cell(cell) ?? cell.v ?? null;
 }
 
 // ── Workbook factory ────────────────────────────────────────────────────────
