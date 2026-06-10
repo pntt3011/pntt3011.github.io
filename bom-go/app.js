@@ -427,9 +427,9 @@ function parseParts(rows) {
       name,
 
       sl: row[2],
-      day_tho: row[3],
-      rong_tho: row[4],
-      dai_tho: row[5],
+      day_tho: row[9],
+      rong_tho: row[7],
+      dai_tho: row[6],
       dai_tinh: row[8],
       khoi: row[10],
       dt_bm: row[11],
