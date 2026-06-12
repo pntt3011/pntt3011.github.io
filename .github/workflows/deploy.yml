@@ -11,19 +11,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Add wasm target
-        run: rustup target add wasm32-unknown-unknown
-
-      - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
-
-      - name: Build wasm library
-        working-directory: ./shared/lib
-        run: wasm-pack build --target web --release
-
       - name: Upload Artifacts
         uses: actions/upload-pages-artifact@v3
         with:
