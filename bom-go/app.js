@@ -2,102 +2,11 @@
 const STEP_WIDTH = 5;
 const DEFAULT_DATA_START_ROW = 19;
 
-// Updated step names
-const CD_STEPS = [
-  'Cắt ngang',
-  'Rong dọc',
-  'Vẽ rập',
-  'Lọng cong',
-  'Sấy 2QT',
+const CD_SHEET_NAME = 'Bảng tra CĐ';
+const CD_DATA_START_ROW = 5; // 1-based, row 5 onward in the lookup sheet
 
-  'Bào ghép 2M',
-  'Bào ghép 4M',
-  'Ghép finger',
-  'Ghép cao tầng',
-  'Ghép cảo',
-
-  'Bào 2M',
-  'Tiện tròn',
-  'Tubi CNC',
-  'Tubi chép hình',
-  'Tubi tay',
-
-  'Chà láng',
-  'Chuốt chốt',
-  'Bào 4M',
-
-  'XLKT Putty',
-  'XLKT Epoxy',
-  'XLKT Vá gỗ',
-
-  'Cắt tay (TC)',
-  'Cắt thẳng',
-  'Cắt xéo',
-  'Cắt router',
-  'Cắt finger',
-
-  'CNC (+) 6 dao',
-  'CNC (+) 2 dao',
-  'CNC (+) 1 dao',
-
-  '3D chống tâm',
-  '3D kẹp lật',
-
-  'Bo R',
-  'Vát góc',
-  'Soi rãnh',
-  'Cẩn ngàm',
-  'Khoét lỗ dù',
-
-  'Đục CNC',
-  'Đục lắc',
-
-  'Khoan lỗ LR',
-  'Khoan lỗ vít',
-  'Khoan lỗ sò',
-  'Khoan lỗ tán bolt',
-  'Khoan lỗ tán dù',
-  'Khoan lỗ ngang',
-  'Khoan lỗ dọc',
-
-  'Quay bọ',
-
-  'Nhám thùng 1M',
-  'Nhám thùng 2M',
-  'Nhám thùng 3M',
-  'Nhám thùng 4M',
-  'Nhám cong',
-
-  'Ép cước',
-  'Cào xước',
-  'Cào tay',
-  'Bắn cát',
-
-  'XL màu gỗ',
-  'XL lông gỗ',
-  'Chà Bo',
-  'Nhám chổi',
-  'Bắn sò',
-
-  'Ráp cụm',
-  'Nhám thùng cụm',
-  'Ráp tổng',
-  'Chạy rãnh',
-  'Chà đĩa',
-
-  'Nguội (Dầu màu)',
-  'Nguội (Glaze)',
-  'Nguội (Pigment)',
-  'Nguội (Nước)',
-
-  'Sơn (Dầu màu)',
-  'Sơn (Glaze)',
-  'Sơn (Pigment)',
-  'Sơn (Nước)',
-
-  'Đan wicker',
-  'Đan dây dù'
-];
+let CD_STEPS = [];
+let CD_STEP_COL = {};
 
 function normalizeStepName(s) {
   return String(s ?? '')
@@ -106,9 +15,33 @@ function normalizeStepName(s) {
     .toLowerCase();
 }
 
-const CD_STEP_COL = Object.fromEntries(
-  CD_STEPS.map((name, i) => [normalizeStepName(name), i + 5])
-);
+function loadStepsFromWorkbook(wb) {
+  const ws = wb.Sheets[CD_SHEET_NAME];
+  if (!ws) throw new Error(`Sheet "${CD_SHEET_NAME}" not found in input file.`);
+
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+  const seen = new Set();
+  const steps = [];
+
+  for (let r = CD_DATA_START_ROW - 1; r < rows.length; r++) {
+    const raw = rows[r]?.[0];
+    if (raw == null || raw === '') continue;
+
+    const name = String(raw).replace(/\s+/g, ' ').trim();
+    const key = normalizeStepName(name);
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    steps.push(name);
+  }
+
+  if (steps.length === 0) throw new Error(`No steps found in sheet "${CD_SHEET_NAME}".`);
+
+  CD_STEPS = steps;
+  CD_STEP_COL = Object.fromEntries(
+    CD_STEPS.map((name, i) => [normalizeStepName(name), i + 5])
+  );
+}
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const dropZone = document.getElementById('dropZone');
@@ -129,13 +62,14 @@ function loadFile(file) {
   reader.onload = (e) => {
     try {
       workbook = XLSX.read(e.target.result, { type: 'array' });
-      populateSheets(workbook.SheetNames);
+      loadStepsFromWorkbook(workbook);
+      populateSheets(workbook.SheetNames.filter(n => n !== CD_SHEET_NAME));
       fileName.textContent = file.name;
       dropZone.classList.add('has-file');
-      setStatus('');
+      setStatus(`Loaded ${CD_STEPS.length} steps from "${CD_SHEET_NAME}".`);
     } catch (err) {
       console.error(err);
-      setStatus('Failed to read file.', 'error');
+      setStatus('Failed to read file: ' + err.message, 'error');
     }
   };
 
@@ -199,7 +133,7 @@ parseBtn.addEventListener('click', () => {
     fillBom(wb.Sheets['bom'], prod, parts);
     fillBomCongDoan(wb.Sheets['BOM_lay_cong_doan'], prod, parts);
 
-    XLSX.writeFile(wb, 'output.xlsx');
+    XLSX.writeFile(wb, `${sheetSelect.value}.xlsx`);
     setStatus('Done — file downloaded.', 'success');
   } catch (e) {
     console.error(e);
