@@ -170,7 +170,13 @@ function exportExcel() {
     const vm = state.viewModel;
     if (!vm || typeof XLSX === 'undefined') return;
 
-    const rawOrder = String(state.parsedCache?.order_name ?? '').trim();
+    const selectedOrders = Array.from(new Set(
+        vm.products
+            .filter(p => p.enabled && p.qty > 0)
+            .map(p => p.order_name)
+            .filter(Boolean)
+    ));
+    const rawOrder = selectedOrders.join('_');
     const safeOrder = rawOrder
         ? rawOrder.replace(/[^0-9A-Za-z]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '').slice(0, 120)
         : '';
@@ -190,15 +196,15 @@ function exportExcel() {
     const summaryTableHeaderRows = [];
 
     summaryTitleRows.push(summaryRows.length);
-    summaryRows.push([vm.order_name ? 'LSX ' + vm.order_name : 'Lệnh sản xuất']);
+    summaryRows.push([selectedOrders.length ? 'LSX ' + selectedOrders.join(', ') : 'Lệnh sản xuất']);
     summaryRows.push([]);
 
     summaryTitleRows.push(summaryRows.length);
     summaryRows.push(['THÔNG TIN SẢN XUẤT']);
-    summaryRows.push(['Steel weight', Number(vm.steelWeight.toFixed(2)), 'kg']);
-    summaryRows.push(['Steel area', Number(vm.steelArea.toFixed(2)), 'm²']);
-    summaryRows.push(['Aluminum weight', Number(vm.aluWeight.toFixed(2)), 'kg']);
-    summaryRows.push(['Aluminum area', Number(vm.aluArea.toFixed(2)), 'm²']);
+    summaryRows.push(['Trọng lượng sắt', Number(vm.steelWeight.toFixed(2)), 'kg']);
+    summaryRows.push(['Diện tích sắt', Number(vm.steelArea.toFixed(2)), 'm²']);
+    summaryRows.push(['Trọng lượng nhôm', Number(vm.aluWeight.toFixed(2)), 'kg']);
+    summaryRows.push(['Diện tích nhôm', Number(vm.aluArea.toFixed(2)), 'm²']);
     summaryRows.push([]);
 
     summaryTitleRows.push(summaryRows.length);
@@ -206,9 +212,8 @@ function exportExcel() {
     summaryTableHeaderRows.push(summaryRows.length);
     summaryRows.push(['Tên sản phẩm', 'Mã', 'Số lượng']);
     for (const p of vm.products) {
-        const cfg = state.productConfigs[p.sheetName];
-        const qty = cfg ? cfg.qty : p.qty;
-        summaryRows.push([p.name, p.code, qty]);
+        if (!p.enabled || !(p.qty > 0)) continue;
+        summaryRows.push([p.name, p.code, p.qty]);
     }
     summaryRows.push([]);
 
@@ -223,7 +228,6 @@ function exportExcel() {
         totalWaste += Number(plan.result.total_waste || 0);
     }
 
-    summaryRows.push(['Chiều dài vật liệu (mm)', 6000]);
     summaryRows.push(['Tổng số thanh', totalBars]);
     summaryRows.push(['Tổng lượng dư thừa (mm)', totalWaste]);
     summaryRows.push([]);
@@ -232,10 +236,13 @@ function exportExcel() {
     summaryRows.push(['CHI TIẾT THEO NHÓM VẬT LIỆU']);
     summaryTableHeaderRows.push(summaryRows.length);
     summaryRows.push([
-        'Vật liệu', 'Nhóm CD', 'Số chi tiết',
+        'Vật liệu', 'SL quy cách', 'Số chi tiết',
         'Dài (mm)', 'Số thanh', 'Dư thừa (mm)', 'Tỷ lệ (%)',
     ]);
-    for (const plan of vm.plans) {
+    const sortedPlans = vm.plans.slice().sort((a, b) =>
+        Render.materialLabel(a.material).localeCompare(Render.materialLabel(b.material), 'vi', { sensitivity: 'base' })
+    );
+    for (const plan of sortedPlans) {
         summaryRows.push([
             Render.materialLabel(plan.material),
             plan.sourceCount,
@@ -245,6 +252,24 @@ function exportExcel() {
             plan.result ? plan.result.total_waste : '',
             plan.result ? Number(plan.result.percentage_wasted.toFixed(2)) : '',
         ]);
+    }
+    summaryRows.push([]);
+
+    if (vm.flatSheetPlans && vm.flatSheetPlans.length) {
+        summaryTitleRows.push(summaryRows.length);
+        summaryRows.push(['CHI TIẾT SẮT TẤM (LA DẸT)']);
+        summaryTableHeaderRows.push(summaryRows.length);
+        summaryRows.push([
+            'Dày (mm)', 'Tổng diện tích (m²)', 'Khổ tấm (mm)', 'Số tấm',
+        ]);
+        for (const sheetPlan of vm.flatSheetPlans) {
+            summaryRows.push([
+                sheetPlan.thickness,
+                Number(sheetPlan.totalArea.toFixed(2)),
+                `${sheetPlan.sheetWidth}x${sheetPlan.sheetHeight}`,
+                sheetPlan.sheetCount,
+            ]);
+        }
     }
 
     const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
@@ -271,7 +296,56 @@ function exportExcel() {
         sectionFill, headerFill, thinBorder,
     });
 
+    if (vm.flatSheetPlans && vm.flatSheetPlans.length) {
+        const { rows: flatSheetRows, titleRows: flatSheetTitleRows, headerRows: flatSheetHeaderRows, merges: flatSheetMerges } =
+            buildFlatSheetRows(vm.flatSheetPlans, 'CHI TIẾT SẮT TẤM (LA DẸT)');
+        const flatSheetSheet = XLSX.utils.aoa_to_sheet(flatSheetRows);
+        XLSX.utils.book_append_sheet(workbook, flatSheetSheet, 'SatTam');
+
+        applyWorkbookStyles(flatSheetSheet, {
+            titleRows: flatSheetTitleRows,
+            tableHeaderRows: flatSheetHeaderRows,
+            mergeRanges: flatSheetMerges,
+            columnWidths: [16, 18, 18, 12],
+            sectionFill, headerFill, thinBorder,
+        });
+    }
+
     XLSX.writeFile(workbook, fileName);
+}
+
+function buildFlatSheetRows(flatSheetPlans, sheetTitle) {
+    const rows = [];
+    const titleRows = [];
+    const headerRows = [];
+    const merges = [];
+
+    titleRows.push(rows.length);
+    rows.push([sheetTitle]);
+    rows.push([]);
+
+    let currentRow = rows.length;
+
+    for (const sheetPlan of flatSheetPlans) {
+        titleRows.push(currentRow);
+        rows.push([`sắt tấm · ${sheetPlan.thickness} mm · ${sheetPlan.sheetCount} tấm ${sheetPlan.sheetWidth}x${sheetPlan.sheetHeight} mm`]);
+        merges.push({ s: { r: currentRow, c: 0 }, e: { r: currentRow, c: 2 } });
+        currentRow++;
+
+        headerRows.push(currentRow);
+        rows.push(['Rộng (mm)', 'Dài (mm)', 'Số lượng']);
+        currentRow++;
+
+        for (const usage of sheetPlan.usage || []) {
+            rows.push([usage.box_height, usage.length, usage.qty]);
+            currentRow++;
+        }
+
+        rows.push([]);
+        currentRow++;
+    }
+
+    return { rows, titleRows, headerRows, merges };
 }
 
 function buildDetailRows(plans, sheetTitle) {
@@ -328,7 +402,7 @@ function buildDetailRows(plans, sheetTitle) {
             materialLengths.forEach(length => {
                 const idx = plan.result.lengths.findIndex(l => Number(l) === Number(length));
                 if (idx >= 0 && Number(pattern.counts?.[idx] || 0) > 0) {
-                    (lengthToProductCodes.get(Number(length)) || []).forEach(c => patternCodes.add(c));
+                    (lengthToProductCodes.get(Number(length)) || []).forEach(({ code }) => patternCodes.add(code));
                 }
             });
 
