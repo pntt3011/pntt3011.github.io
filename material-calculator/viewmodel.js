@@ -4,15 +4,6 @@ const STOCK_LENGTH = 5950;
 const STOCK_DISPLAY_OFFSET = 50;
 const DEFAULT_MAX_PATTERN_WASTE = 600;
 
-// Optimal stock-length search parameters (mirrors Rust defaults in lib.rs).
-const OPT_STOCK_STEP = 100;
-const OPT_MAX_CANDIDATES = 300;
-const OPT_REFINE = true;
-const OPT_REFINE_TOP_K = 10;
-const OPT_REFINE_RADIUS = OPT_STOCK_STEP * 2;
-const OPT_REFINE_STEP = 10;
-const OPT_INCLUDE_COMBINATION_CANDIDATES = true;
-
 export function buildViewModel(parsedResult, productConfigs) {
     const { products = [], order_name = null } = parsedResult;
 
@@ -34,8 +25,6 @@ export function buildViewModel(parsedResult, productConfigs) {
         order_name,
         products: productItems,
         ...aggregateSummary(products, productConfigs),
-        powderCoating: aggregateSteelPainting(products, productConfigs),
-        woodPainting: aggregateWoodPainting(products, productConfigs),
         ...aggregateCuttingPlan(products, productConfigs),
     };
 }
@@ -51,14 +40,13 @@ function aggregateSummary(products, productConfigs) {
     const {
         calcSteelWeightPerUnit,
         calcSteelAreaPerUnit,
-        calcWoodAreaPerUnit,
-        calcWoodVolumePerUnit,
+        normalize,
     } = window.BomParser;
 
     let steelWeight = 0;
     let steelArea = 0;
-    let woodArea = 0;
-    let woodVolume = 0;
+    let aluWeight = 0;
+    let aluArea = 0;
 
     for (const product of products) {
         const qty = getEnabledQty(product, productConfigs);
@@ -67,70 +55,21 @@ function aggregateSummary(products, productConfigs) {
         for (const component of product.components) {
             for (const part of component.parts) {
                 const total = part.qty * qty;
-                if (component.kind === 'steel') {
-                    steelWeight += calcSteelWeightPerUnit(part) * total;
-                    steelArea += calcSteelAreaPerUnit(part) * total;
+                const weight = calcSteelWeightPerUnit(part) * total;
+                const area = calcSteelAreaPerUnit(part) * total;
+
+                if (normalize(part.type ?? '').startsWith('nhom')) {
+                    aluWeight += weight;
+                    aluArea += area;
                 } else {
-                    woodArea += calcWoodAreaPerUnit(part) * total;
-                    woodVolume += calcWoodVolumePerUnit(part) * total;
+                    steelWeight += weight;
+                    steelArea += area;
                 }
             }
         }
     }
 
-    return { steelWeight, steelArea, woodArea, woodVolume };
-}
-
-// Steel: color code from _(TĐ.<code>) on component headers, area per part via calcSteelAreaPerUnit
-function aggregateSteelPainting(products, productConfigs) {
-    const { calcSteelAreaPerUnit } = window.BomParser;
-    const map = new Map();
-
-    for (const product of products) {
-        const qty = getEnabledQty(product, productConfigs);
-        if (!qty) continue;
-
-        for (const component of product.components) {
-            if (component.kind !== 'steel' || !component.paint_color) continue;
-            for (const part of component.parts) {
-                const area = calcSteelAreaPerUnit(part) * part.qty * qty;
-                map.set(component.paint_color, (map.get(component.paint_color) ?? 0) + area);
-            }
-        }
-    }
-
-    return Array.from(map.entries())
-        .map(([code, area]) => ({ code, area }))
-        .sort((a, b) => a.code.localeCompare(b.code));
-}
-
-// Wood: color code from _(S.<code>) on component headers, area per part via calcWoodAreaPerUnit
-
-const WOOD_PAINT_RE = /\(S\.([^)]+)\)/;
-
-function aggregateWoodPainting(products, productConfigs) {
-    const { calcWoodAreaPerUnit } = window.BomParser;
-    const map = new Map();
-
-    for (const product of products) {
-        const qty = getEnabledQty(product, productConfigs);
-        if (!qty) continue;
-
-        for (const component of product.components) {
-            if (component.kind !== 'wood') continue;
-            const match = component.name.match(WOOD_PAINT_RE);
-            if (!match) continue;
-            const code = match[1].trim();
-            for (const part of component.parts) {
-                const area = calcWoodAreaPerUnit(part) * part.qty * qty;
-                map.set(code, (map.get(code) ?? 0) + area);
-            }
-        }
-    }
-
-    return Array.from(map.entries())
-        .map(([code, area]) => ({ code, area }))
-        .sort((a, b) => a.code.localeCompare(b.code));
+    return { steelWeight, steelArea, aluWeight, aluArea };
 }
 
 // ── Cutting plan ───────────────────────────────────────────────────────────────
@@ -156,7 +95,6 @@ function aggregateCuttingPlan(products, productConfigs) {
                     normalize(part.type ?? ''),
                     normalize(part.shape ?? ''),
                     part.thickness,
-                    part.cut,
                 ]);
 
                 if (!grouped.has(key)) {
@@ -166,7 +104,6 @@ function aggregateCuttingPlan(products, productConfigs) {
                         type: part.type,
                         shape: part.shape,
                         thickness: part.thickness,
-                        cut: part.cut,
                         usageMap: new Map(),
                     });
                 }
@@ -193,7 +130,6 @@ function aggregateCuttingPlan(products, productConfigs) {
             type: item.type,
             shape: item.shape,
             thickness: item.thickness,
-            cut: item.cut,
             usage: Array.from(item.usageMap.entries())
                 .sort(([a], [b]) => a - b)
                 .map(([length, { qty, productCodes }]) => ({
@@ -204,7 +140,7 @@ function aggregateCuttingPlan(products, productConfigs) {
             const aL = a.box_length ?? -Infinity;
             const bL = b.box_length ?? -Infinity;
             if (aL !== bL) return bL - aL;
-            return `${a.type}${a.shape}${a.cut}`.localeCompare(`${b.type}${b.shape}${b.cut}`, 'vi', { sensitivity: 'base' });
+            return `${a.type}${a.shape}`.localeCompare(`${b.type}${b.shape}`, 'vi', { sensitivity: 'base' });
         });
 
     const plans = materials.map(computeMaterialPlan);
@@ -237,25 +173,9 @@ function computeMaterialPlan(material) {
         max_pattern_waste: maxPatternWaste,
     };
 
-    const optInput = {
-        lengths,
-        quantities,
-        bundle_size: 1,
-        max_pattern_waste: maxPatternWaste,
-        max_stock_length: STOCK_LENGTH,
-        stock_step: OPT_STOCK_STEP,
-        max_candidates: OPT_MAX_CANDIDATES,
-        refine: OPT_REFINE,
-        refine_top_k: OPT_REFINE_TOP_K,
-        refine_radius: OPT_REFINE_RADIUS,
-        refine_step: OPT_REFINE_STEP,
-        include_combination_candidates: OPT_INCLUDE_COMBINATION_CANDIDATES,
-    };
-
     return {
         material,
         input,
-        optInput,
         displayStockLength: STOCK_LENGTH + STOCK_DISPLAY_OFFSET,
         result: null,
         error: lengths.length ? null : 'Không có chi tiết hợp lệ.',
@@ -263,4 +183,3 @@ function computeMaterialPlan(material) {
         requiredTotal: quantities.reduce((sum, q) => sum + q, 0),
     };
 }
-

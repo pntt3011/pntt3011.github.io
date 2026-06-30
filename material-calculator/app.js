@@ -3,8 +3,6 @@ import * as Render from './view.js';
 
 let wasmWorker = null;
 
-const STOCK_DISPLAY_OFFSET = 50;
-
 const state = {
     wasmReady: false,
     parsedCache: null,
@@ -29,11 +27,8 @@ function boot() {
 
 function cacheElements() {
     elements.appStatus = document.getElementById('appStatus');
-    elements.dropzone = document.getElementById('dropzone');
-    elements.fileInput = document.getElementById('fileInput');
     elements.resultsList = document.getElementById('resultsList');
     elements.exportButton = document.getElementById('exportButton');
-    elements.browseButton = elements.dropzone.querySelector('.browse-button');
     elements.resultsPanelTitle = document.getElementById('resultsPanelTitle');
     elements.productListSection = document.getElementById('productListSection');
     elements.productList = document.getElementById('productList');
@@ -56,6 +51,8 @@ async function init() {
         state.wasmReady = true;
         Render.setStatus(elements.appStatus, 'ready', 'Sẵn sàng');
         setExportEnabled(false);
+
+        await loadData();
     } catch (err) {
         Render.setStatus(elements.appStatus, 'error', 'Lỗi');
         throw err;
@@ -63,44 +60,7 @@ async function init() {
 }
 
 function bindEvents() {
-    elements.dropzone.addEventListener('click', event => {
-        if (event.target === elements.fileInput) return;
-        elements.fileInput.click();
-    });
-
-    elements.dropzone.addEventListener('keydown', event => {
-        if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            elements.fileInput.click();
-        }
-    });
-
-    elements.browseButton.addEventListener('click', event => {
-        event.stopPropagation();
-        elements.fileInput.click();
-    });
-
     elements.exportButton.addEventListener('click', exportExcel);
-
-    elements.fileInput.addEventListener('change', () => {
-        if (elements.fileInput.files?.length) handleFiles(elements.fileInput.files);
-    });
-
-    elements.dropzone.addEventListener('dragover', event => {
-        event.preventDefault();
-        elements.dropzone.classList.add('is-dragover');
-    });
-
-    elements.dropzone.addEventListener('dragleave', () => {
-        elements.dropzone.classList.remove('is-dragover');
-    });
-
-    elements.dropzone.addEventListener('drop', event => {
-        event.preventDefault();
-        elements.dropzone.classList.remove('is-dragover');
-        const files = event.dataTransfer?.files;
-        if (files?.length) handleFiles(files);
-    });
 
     elements.calculateButton.addEventListener('click', () => {
         if (!state.parsedCache) return;
@@ -108,15 +68,7 @@ function bindEvents() {
     });
 }
 
-async function handleFiles(fileList) {
-    const files = Array.from(fileList).filter(isExcelFile);
-
-    if (!files.length) {
-        Render.setStatus(elements.appStatus, 'error', 'File không hợp lệ');
-        Render.renderErrorState('Vui lòng chọn file Excel có phần mở rộng .xlsx, .xls hoặc .xlsm.');
-        return;
-    }
-
+async function loadData() {
     state.parsedCache = null;
     state.validation = [];
     state.productConfigs = {};
@@ -127,21 +79,15 @@ async function handleFiles(fileList) {
     elements.productCount.textContent = '';
     elements.productListSection.hidden = true;
     elements.calculateButton.disabled = true;
-    Render.renderEmptyState('Đang đọc workbook', 'Hệ thống đang gom dữ liệu BOM.');
+    Render.renderEmptyState('Đang tải dữ liệu', 'Hệ thống đang gom dữ liệu BOM.');
 
     try {
-        if (!window.XLSX) throw new Error('SheetJS XLSX is not available.');
+        const response = await fetch('./data.json');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const result = await response.json();
 
-        const parsedResults = [];
-        for (let i = 0; i < files.length; i++) {
-            const buffer = await files[i].arrayBuffer();
-            const workbook = window.XLSX.read(buffer, { type: 'array', cellDates: false });
-            const result = window.BomParser.parseWorkbook(workbook, { includeValidation: true });
-            parsedResults.push({ result, fileIndex: i });
-        }
-
-        state.parsedCache = mergeResults(parsedResults);
-        state.validation = state.parsedCache.validation ?? [];
+        state.parsedCache = result;
+        state.validation = result.validation ?? [];
 
         for (const product of state.parsedCache.products) {
             state.productConfigs[product.id] = { qty: product.qty ?? 0, enabled: true };
@@ -152,34 +98,8 @@ async function handleFiles(fileList) {
         console.error(error);
         Render.setStatus(elements.appStatus, 'error', 'Xử lý thất bại');
         setExportEnabled(false);
-        Render.renderErrorState('Không thể phân tích file Excel.', error?.message || String(error));
+        Render.renderErrorState('Không thể tải dữ liệu BOM.', error?.message || String(error));
     }
-}
-
-function mergeResults(parsedResults) {
-    const allProducts = [];
-    const allValidation = [];
-    const orderNames = [];
-
-    for (const { result, fileIndex } of parsedResults) {
-        const orderName = result.order_name ?? null;
-        if (orderName) orderNames.push(orderName);
-
-        for (const product of result.products) {
-            const id = orderName
-                ? `${orderName}::${product.sheetName}`
-                : `${fileIndex}::${product.sheetName}`;
-            allProducts.push({ ...product, id, order_name: orderName });
-        }
-
-        if (result.validation) allValidation.push(...result.validation);
-    }
-
-    return {
-        order_name: orderNames.join(', ') || null,
-        products: allProducts,
-        validation: allValidation,
-    };
 }
 
 function runCalculation() {
@@ -189,7 +109,6 @@ function runCalculation() {
     const runId = state.optimizationId;
 
     state.viewModel = buildViewModel(state.parsedCache, state.productConfigs);
-    state.viewModel.optimizedPlans = null;
 
     Render.renderProducts(state.viewModel.products, {
         onToggle: (id, enabled) => {
@@ -212,13 +131,6 @@ function runCalculation() {
         state.pendingPlans++;
         wasmWorker.postMessage({ type: 'computePlan', runId, index: i, input: plans[i].input });
     }
-    if (state.pendingPlans === 0) checkStartOptimization(runId);
-}
-
-const WASTE_ALERT_PCT = 1.0;
-
-function needsOptimization(plan) {
-    return !plan.error && plan.result?.percentage_wasted >= WASTE_ALERT_PCT;
 }
 
 function handleWorkerMessage({ data }) {
@@ -233,19 +145,6 @@ function handleWorkerMessage({ data }) {
         };
         state.pendingPlans--;
         Render.refreshCuttingSection(state.viewModel);
-        if (state.pendingPlans === 0) checkStartOptimization(runId);
-
-    } else if (type === 'optimalPlanResult') {
-        const basePlan = state.viewModel.plans[index];
-        const bestStockLength = data.optResult?.best_stock_length ?? basePlan.input.stock_length;
-        state.viewModel.optimizedPlans[index] = {
-            ...basePlan,
-            input: { ...basePlan.input, stock_length: bestStockLength },
-            displayStockLength: bestStockLength + STOCK_DISPLAY_OFFSET,
-            result: data.optResult?.best_result ?? null,
-            error: data.error ?? null,
-        };
-        Render.refreshCuttingSection(state.viewModel);
     }
 }
 
@@ -253,24 +152,6 @@ function handleWorkerError(err) {
     console.error('Worker crashed:', err);
     Render.setStatus(elements.appStatus, 'error', 'Lỗi tính toán');
     Render.renderErrorState('Bộ tính toán gặp lỗi. Vui lòng tải lại trang.', err?.message || String(err));
-}
-
-function checkStartOptimization(runId) {
-    if (runId !== state.optimizationId) return;
-    const plans = state.viewModel?.plans;
-    if (!plans?.length) return;
-
-    const optimizedPlans = new Array(plans.length).fill(null);
-    state.viewModel.optimizedPlans = optimizedPlans;
-
-    for (let i = 0; i < plans.length; i++) {
-        if (needsOptimization(plans[i])) {
-            wasmWorker.postMessage({ type: 'computeOptimalPlan', runId, index: i, optInput: plans[i].optInput });
-        } else {
-            optimizedPlans[i] = plans[i];
-        }
-    }
-    Render.refreshCuttingSection(state.viewModel);
 }
 
 // ── Excel export ───────────────────────────────────────────────────────────────
@@ -306,8 +187,8 @@ function exportExcel() {
     summaryRows.push(['THÔNG TIN SẢN XUẤT']);
     summaryRows.push(['Steel weight', Number(vm.steelWeight.toFixed(2)), 'kg']);
     summaryRows.push(['Steel area', Number(vm.steelArea.toFixed(2)), 'm²']);
-    summaryRows.push(['Wood area', Number(vm.woodArea.toFixed(2)), 'm²']);
-    summaryRows.push(['Wood volume', Number(vm.woodVolume.toFixed(4)), 'm³']);
+    summaryRows.push(['Aluminum weight', Number(vm.aluWeight.toFixed(2)), 'kg']);
+    summaryRows.push(['Aluminum area', Number(vm.aluArea.toFixed(2)), 'm²']);
     summaryRows.push([]);
 
     summaryTitleRows.push(summaryRows.length);
@@ -322,39 +203,19 @@ function exportExcel() {
     summaryRows.push([]);
 
     summaryTitleRows.push(summaryRows.length);
-    summaryRows.push(['YÊU CẦU SƠN']);
-    summaryTableHeaderRows.push(summaryRows.length);
-    summaryRows.push(['Mã màu', 'Diện tích (m²)']);
-    for (const { code, area } of vm.powderCoating) {
-        summaryRows.push([code, Number(area.toFixed(2))]);
-    }
-    if (!vm.powderCoating.length) summaryRows.push(['—', '']);
-    summaryRows.push([]);
-
-    summaryTitleRows.push(summaryRows.length);
     summaryRows.push(['TỔNG HỢP CẮT PHÔI']);
     summaryRows.push(['Số nhóm vật liệu', vm.plans.length]);
 
     let totalBars = 0, totalWaste = 0;
-    let totalBarsOpt = 0, totalWasteOpt = 0;
-    const hasOpt = Array.isArray(vm.optimizedPlans) && vm.optimizedPlans.some(p => p?.result);
     for (const plan of vm.plans) {
         if (!plan.result) continue;
         totalBars += Number(plan.result.stock_qty || 0);
         totalWaste += Number(plan.result.total_waste || 0);
     }
-    if (hasOpt) {
-        for (const plan of vm.optimizedPlans) {
-            if (!plan?.result) continue;
-            totalBarsOpt += Number(plan.result.stock_qty || 0);
-            totalWasteOpt += Number(plan.result.total_waste || 0);
-        }
-    }
 
-    summaryRows.push(['', 'Gốc', hasOpt ? 'Tối ưu' : '']);
-    summaryRows.push(['Chiều dài vật liệu (mm)', 6000, hasOpt ? '(xem chi tiết)' : '']);
-    summaryRows.push(['Tổng số thanh', totalBars, hasOpt ? totalBarsOpt : '']);
-    summaryRows.push(['Tổng lượng dư thừa (mm)', totalWaste, hasOpt ? totalWasteOpt : '']);
+    summaryRows.push(['Chiều dài vật liệu (mm)', 6000]);
+    summaryRows.push(['Tổng số thanh', totalBars]);
+    summaryRows.push(['Tổng lượng dư thừa (mm)', totalWaste]);
     summaryRows.push([]);
 
     summaryTitleRows.push(summaryRows.length);
@@ -362,12 +223,9 @@ function exportExcel() {
     summaryTableHeaderRows.push(summaryRows.length);
     summaryRows.push([
         'Vật liệu', 'Nhóm CD', 'Số chi tiết',
-        'Dài GC (mm)', 'Số thanh GC', 'Dư thừa GC (mm)', 'Tỷ lệ GC (%)',
-        ...(hasOpt ? ['Dài TU (mm)', 'Số thanh TU', 'Dư thừa TU (mm)', 'Tỷ lệ TU (%)'] : []),
+        'Dài (mm)', 'Số thanh', 'Dư thừa (mm)', 'Tỷ lệ (%)',
     ]);
-    for (let i = 0; i < vm.plans.length; i++) {
-        const plan = vm.plans[i];
-        const opt = hasOpt ? vm.optimizedPlans[i] : null;
+    for (const plan of vm.plans) {
         summaryRows.push([
             Render.materialLabel(plan.material),
             plan.sourceCount,
@@ -376,12 +234,6 @@ function exportExcel() {
             plan.result ? plan.result.stock_qty : '',
             plan.result ? plan.result.total_waste : '',
             plan.result ? Number(plan.result.percentage_wasted.toFixed(2)) : '',
-            ...(hasOpt ? [
-                opt?.displayStockLength ?? opt?.input?.stock_length ?? '',
-                opt?.result ? opt.result.stock_qty : '',
-                opt?.result ? opt.result.total_waste : '',
-                opt?.result ? Number(opt.result.percentage_wasted.toFixed(2)) : '',
-            ] : []),
         ]);
     }
 
@@ -389,31 +241,15 @@ function exportExcel() {
     XLSX.utils.book_append_sheet(workbook, summarySheet, 'TongHop');
 
     const { rows: detailRows, titleRows: detailTitleRows, headerRows: detailHeaderRows, merges: detailMerges, maxLengthCols } =
-        buildDetailRows(vm.plans, 'CHI TIẾT MẪU CẮT - GỐC');
+        buildDetailRows(vm.plans, 'CHI TIẾT MẪU CẮT');
     const detailSheet = XLSX.utils.aoa_to_sheet(detailRows);
     XLSX.utils.book_append_sheet(workbook, detailSheet, 'ChiTiet');
-
-    if (hasOpt) {
-        const { rows: optRows, titleRows: optTitleRows, headerRows: optHeaderRows, merges: optMerges, maxLengthCols: optMaxCols } =
-            buildDetailRows(vm.optimizedPlans.filter(Boolean), 'CHI TIẾT MẪU CẮT - TỐI ƯU');
-        const optSheet = XLSX.utils.aoa_to_sheet(optRows);
-        XLSX.utils.book_append_sheet(workbook, optSheet, 'ToiUu');
-        applyWorkbookStyles(optSheet, {
-            titleRows: optTitleRows,
-            tableHeaderRows: optHeaderRows,
-            mergeRanges: optMerges,
-            columnWidths: [24, 22, 12, ...Array(optMaxCols).fill(12), 16, 14],
-            sectionFill, headerFill, thinBorder,
-        });
-    }
 
     applyWorkbookStyles(summarySheet, {
         titleRows: summaryTitleRows,
         tableHeaderRows: summaryTableHeaderRows,
         mergeRanges: [],
-        columnWidths: hasOpt
-            ? [28, 12, 12, 14, 12, 16, 12, 14, 12, 16, 12]
-            : [28, 12, 12, 14, 12, 16, 12],
+        columnWidths: [28, 12, 12, 14, 12, 16, 12],
         sectionFill, headerFill, thinBorder,
     });
 
@@ -555,11 +391,6 @@ function applyWorkbookStyles(sheet, { titleRows, tableHeaderRows, mergeRanges, c
 function setExportEnabled(enabled) {
     if (!elements.exportButton) return;
     elements.exportButton.disabled = !enabled;
-}
-
-function isExcelFile(file) {
-    const name = String(file?.name || '').toLowerCase();
-    return name.endsWith('.xlsx') || name.endsWith('.xls') || name.endsWith('.xlsm');
 }
 
 if (document.readyState === 'loading') {

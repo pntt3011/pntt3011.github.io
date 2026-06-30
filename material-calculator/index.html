@@ -21,24 +21,7 @@
                         Phần mềm vật tư
                     </h1>
                 </div>
-                <span id="appStatus" class="status-pill status-pill--loading">Đang chờ file</span>
-            </div>
-
-            <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Chọn file Excel">
-                <input id="fileInput" class="file-input" type="file" accept=".xlsx,.xls,.xlsm" multiple />
-                <div class="dropzone-icon" aria-hidden="true">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                        stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 3v12"></path>
-                        <path d="m8 7 4-4 4 4"></path>
-                        <path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"></path>
-                    </svg>
-                </div>
-                <div class="dropzone-copy">
-                    <h2>Thả file BOM vào đây</h2>
-                    <p>Hỗ trợ .xlsx, .xls, .xlsm</p>
-                </div>
-                <button type="button" class="secondary-button browse-button">Chọn file Excel</button>
+                <span id="appStatus" class="status-pill status-pill--loading">Đang tải dữ liệu</span>
             </div>
 
             <div id="productListSection" class="product-list-section" hidden>
@@ -60,7 +43,7 @@
                     </svg>
                     Tính toán
                 </button>
-                <p class="calc-hint">Tải file BOM và chọn ít nhất một sản phẩm</p>
+                <p class="calc-hint">Chọn ít nhất một sản phẩm</p>
             </div>
         </section>
 

@@ -3,7 +3,6 @@
   <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 
   Public API (same surface as before):
-    BomParser.parseBomFile(file, options?)   → Promise<WorkbookResult>
     BomParser.parseWorkbook(workbook, options?) → WorkbookResult
     BomParser.validateBomSheet(sheet)          → ValidationResult
     BomParser.extractOrderName(workbook)       → string | null
@@ -25,24 +24,11 @@
     components: Component[],
   }
 
-  Component:  (one per colour-group header inside "PHẦN SẮT", OR the single
-               implicit "wood" group in the wood section)
+  Component:  (one per colour-group header inside "PHẦN SẮT")
   {
     name:        string,         // header label in col B, colour code stripped
-    paint_color: string | null,  // extracted from _(TĐ.<code>) suffix; null for wood
-    kind:        'wood' | 'steel',
+    kind:        'steel',
     parts:       Part[],
-  }
-
-  WoodPart:
-  {
-    kind:      'wood',
-    name:      string,           // col B
-    qty:       number,           // col C
-    thickness: number | null,    // col G (finished)
-    width:     number | null,    // col H (finished)
-    length:    number | null,    // col I (finished)
-    joint:     number | null,    // col J
   }
 
   SteelPart:
@@ -50,7 +36,6 @@
     kind:       'steel',
     name:       string,          // col B
     qty:        number,          // col C
-    cut:        'cnc' | 'laser', // col A contains "CNC" → cnc, else laser
     box_width:  number | null,   // col D  Dia/rộng hộp
     box_height: number | null,   // col E  Dia/dài hộp
     length:     number | null,   // col F  Dài chi tiết
@@ -66,18 +51,10 @@
       sum over steel parts of:  qty * box_width * box_height * length * density
       (density comes from col I "KL Riêng" — not stored here; use 7850 kg/m³ for steel)
 
-  • Paint area per colour per product:
-      filter components by paint_color, sum over their steel parts of:
-      qty * 2*(box_width + box_height) * length  (in mm → convert to m²)
-
-  • Wood volume per product:
-      sum over wood parts of: qty * thickness * width * length (mm³ → m³)
-
-  These were previously pre-computed in parseBomSheet / extractManufacturedSummary
-  / extractPowderCoating.  The sheet itself stores the pre-computed totals in
-  cols K (weight) and L (area) per part row, and the grand totals in the
-  "Cộng - TOTAL" row — your app can still read those from the raw sheet if you
-  prefer pre-computed values.
+  These were previously pre-computed in parseBomSheet / extractManufacturedSummary.
+  The sheet itself stores the pre-computed totals in cols K (weight) and L (area)
+  per part row, and the grand totals in the "Cộng - TOTAL" row — your app can
+  still read those from the raw sheet if you prefer pre-computed values.
   ────────────────────────────────────────────────────────────────────────────
 */
 
@@ -110,15 +87,6 @@
             .replace(/[đĐ]/g, 'd')
             .replace(/[:：]/g, '')
             .replace(/\s+/g, ' ');
-    }
-
-    // Extract paint colour from component-header strings like
-    //   "CỤM HÔNG_(TĐ.αATD2205)"  or  "CHI TIẾT RỜI__(TĐ.βAFD7067)"
-    const COLOR_CODE_RE = /\(T[DĐdđ]\.([^)]+)\)/;
-
-    function extractColor(text) {
-        const m = text.match(COLOR_CODE_RE);
-        return m ? m[1].trim() : null;
     }
 
     // Strip the colour-code suffix and trailing underscores from a label
@@ -188,21 +156,16 @@
     // ── section parsing ───────────────────────────────────────────────────────
 
     // Row 16 (0-indexed: 15) is the header row with "Tên chi tiết" in col B.
-    // Data starts at row 17 (0-indexed: 16) but effectively at row 19 (18)
-    // after the two sub-header rows.  We use the col-B sentinel strings to
-    // locate the three boundaries rather than hardcoding row numbers.
+    // We use the col-B sentinel strings to locate the boundaries rather than
+    // hardcoding row numbers.
 
     function findSectionBoundaries(rows) {
-        let woodStart = -1;   // row after "Tên chi tiết"
         let steelStart = -1;  // row of "PHẦN SẮT - not KD" (the col-C/D header row)
         let totalRow = -1;    // row of "Cộng - TOTAL"
 
         for (let r = 0; r < rows.length; r++) {
             const b = cleanText(rows[r]?.[1]);
             const nb = normalize(b);
-
-            if (nb === 'ten chi tiet' || nb.includes('ten chi tiet'))
-                woodStart = r + 1;          // data begins on the next row
 
             if (nb.includes('phan sat') && nb.includes('not kd'))
                 steelStart = r;             // this row IS the steel column-header row
@@ -211,72 +174,7 @@
                 totalRow = r;
         }
 
-        return { woodStart, steelStart, totalRow };
-    }
-
-    // ── wood section ──────────────────────────────────────────────────────────
-
-    /**
-     * Parse wood parts between woodStart and steelStart.
-     * Returns an array of Component objects (one per component-header row).
-     *
-     * A component-header row: col B has a value, col C is null/undefined.
-     * A part row:             col B has a value AND col C has a qty.
-     *   OR (rare): col B is null but col C has a qty (part belongs to last component).
-     *
-     * Wood part columns (0-indexed):
-     *   B=1 name, C=2 qty, G=6 thickness(finished), H=7 width(finished),
-     *   I=8 length(finished), J=9 joint
-     */
-    function parseWoodSection(rows, woodStart, steelStart) {
-        const components = [];
-        let current = null;
-
-        const end = steelStart > woodStart ? steelStart : rows.length;
-
-        for (let r = woodStart; r < end; r++) {
-            const row = rows[r] || [];
-            const b = cleanText(row[1]);
-            const cVal = row[2];
-            const qty = toNumber(cVal);
-
-            // Skip summary / metadata rows that appear near the bottom of the wood block
-            const nb = normalize(b);
-            if (nb.includes('quy cach phoi') || nb.includes('tong kl')) continue;
-
-            const isComponentHeader = b && (qty === null || qty === undefined || isNaN(qty));
-            const isPartRow = qty !== null && qty > 0;
-
-            if (isComponentHeader) {
-                current = {
-                    name: b,
-                    paint_color: null,
-                    kind: 'wood',
-                    parts: [],
-                };
-                components.push(current);
-                continue;
-            }
-
-            if (isPartRow) {
-                if (!current) {
-                    // Part appears before any component header — create an implicit one
-                    current = { name: '', paint_color: null, kind: 'wood', parts: [] };
-                    components.push(current);
-                }
-                current.parts.push({
-                    kind: 'wood',
-                    name: b || '',
-                    qty,
-                    thickness: toNumber(row[6]) || null,
-                    width: toNumber(row[7]) || null,
-                    length: toNumber(row[8]) || null,
-                    joint: toNumber(row[9]) || null,
-                });
-            }
-        }
-
-        return components.filter(c => c.parts.length > 0);
+        return { steelStart, totalRow };
     }
 
     // ── steel section ─────────────────────────────────────────────────────────
@@ -291,7 +189,6 @@
      * A part row: col B has a value AND col C has a qty.
      *
      * Steel part columns (0-indexed):
-     *   A=0 cut method (contains "CNC" → 'cnc', else 'laser'),
      *   B=1 name, C=2 qty, D=3 box_width, E=4 box_height, F=5 length,
      *   G=6 thickness, H=7 type, J=9 shape
      */
@@ -312,10 +209,8 @@
             const isComponentHeader = qty === null;
 
             if (isComponentHeader) {
-                const color = extractColor(b);
                 current = {
                     name: stripColorSuffix(b),
-                    paint_color: color,
                     kind: 'steel',
                     parts: [],
                 };
@@ -326,7 +221,7 @@
             if (qty !== null && qty > 0) {
                 if (!current) {
                     // Steel parts before any component header — implicit group
-                    current = { name: '', paint_color: null, kind: 'steel', parts: [] };
+                    current = { name: '', kind: 'steel', parts: [] };
                     components.push(current);
                 }
                 current.parts.push({
@@ -339,7 +234,6 @@
                     thickness: toNumber(row[6]) ?? null,
                     type: cleanText(row[7]) || null,
                     shape: cleanText(row[9]) || null,
-                    cut: normalize(cleanText(row[0])).includes('cnc') ? 'cnc' : 'laser',
                 });
             }
         }
@@ -397,11 +291,7 @@
             });
 
             const qty = extractProductQty(rows);
-            const { woodStart, steelStart, totalRow } = findSectionBoundaries(rows);
-
-            const woodComponents = (woodStart >= 0 && steelStart > woodStart)
-                ? parseWoodSection(rows, woodStart, steelStart)
-                : [];
+            const { steelStart, totalRow } = findSectionBoundaries(rows);
 
             const steelComponents = (steelStart >= 0)
                 ? parseSteelSection(rows, steelStart, totalRow)
@@ -412,7 +302,7 @@
                 name: v.name,
                 code: v.code,
                 qty,
-                components: [...woodComponents, ...steelComponents],
+                components: steelComponents,
             });
         }
 
@@ -421,15 +311,6 @@
         try { result.order_name = extractOrderName(workbook) ?? null; } catch (_) { }
         if (options.includeValidation) result.validation = validation;
         return result;
-    }
-
-    // ── file entry point ──────────────────────────────────────────────────────
-
-    async function parseBomFile(file, options = {}) {
-        if (!global.XLSX) throw new Error('SheetJS XLSX is required');
-        const buffer = await file.arrayBuffer();
-        const workbook = global.XLSX.read(buffer, { type: 'array', cellDates: false });
-        return parseWorkbook(workbook, options);
     }
 
     // ── calculations ──────────────────────────────────────────────────────────
@@ -583,64 +464,9 @@
         return EXCEL_PI * D * F / 1e6;
     }
 
-    /**
-     * Compute the volume (m³) of ONE wood part (qty = 1).
-     *
-     * Excel formula:  ROUND(G * H * (I + J) * C / 10^9, 5)
-     * With qty removed: G * H * (I + J) / 10^9
-     *
-     * G = thickness (mm), H = width (mm), I = length (mm), J = joint (mm).
-     * The joint length is added to I because the raw blank includes the tenon.
-     *
-     * @param {{
-     *   thickness: number|null,  // col G
-     *   width:     number|null,  // col H
-     *   length:    number|null,  // col I
-     *   joint:     number|null,  // col J  (tenon/mortise addition; 0 if absent)
-     * }} part
-     * @returns {number}  volume in m³ per unit, or 0 if inputs are insufficient
-     */
-    function calcWoodVolumePerUnit(part) {
-        const G = part.thickness;
-        const H = part.width;
-        const I = part.length;
-        const J = part.joint ?? 0;
-
-        if (G == null || H == null || I == null) return 0;
-        return G * H * (I + J) / 1e9;
-    }
-
-    /**
-     * Compute the surface area (m²) of ONE wood part (qty = 1).
-     *
-     * Excel formula:  ROUND(2 * (G + H) * (I + J) * C / 10^6, 4)
-     * With qty removed: 2 * (G + H) * (I + J) / 10^6
-     *
-     * This is the lateral surface area of the rectangular blank
-     * (perimeter × effective length, including joint).
-     *
-     * @param {{
-     *   thickness: number|null,  // col G
-     *   width:     number|null,  // col H
-     *   length:    number|null,  // col I
-     *   joint:     number|null,  // col J
-     * }} part
-     * @returns {number}  surface area in m² per unit, or 0 if inputs are insufficient
-     */
-    function calcWoodAreaPerUnit(part) {
-        const G = part.thickness;
-        const H = part.width;
-        const I = part.length;
-        const J = part.joint ?? 0;
-
-        if (G == null || H == null || I == null) return 0;
-        return 2 * (G + H) * (I + J) / 1e6;
-    }
-
     // ── exports ───────────────────────────────────────────────────────────────
 
-    global.BomParser = {
-        parseBomFile,
+    const BomParser = {
         parseWorkbook,
         validateBomSheet,
         extractOrderName,
@@ -649,10 +475,12 @@
         getSteelDensity,
         calcSteelWeightPerUnit,
         calcSteelAreaPerUnit,
-        calcWoodVolumePerUnit,
-        calcWoodAreaPerUnit,
     };
 
-    global.bom_parse = parseBomFile;
+    global.BomParser = BomParser;
+
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = BomParser;
+    }
 
 })(typeof window !== 'undefined' ? window : globalThis);

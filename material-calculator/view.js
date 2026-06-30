@@ -2,7 +2,6 @@
 
 const numberFormatter = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 });
 const areaFormatter = new Intl.NumberFormat('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const WASTE_ALERT_PCT = 1.0;
 
 let el = {};
 
@@ -90,7 +89,7 @@ function buildProductItem(product, { onToggle, onQtyChange }) {
 // ── Results panel ──────────────────────────────────────────────────────────────
 
 export function renderResults(viewModel, { onExportEnabled }) {
-    const { order_name, plans, optimizedPlans, powderCoating, woodPainting, steelWeight, steelArea, woodArea, woodVolume } = viewModel;
+    const { order_name, plans, steelWeight, steelArea, aluWeight, aluArea } = viewModel;
 
     if (el.resultsPanelTitle) {
         el.resultsPanelTitle.textContent = 'Thông tin lệnh sản xuất';
@@ -99,32 +98,24 @@ export function renderResults(viewModel, { onExportEnabled }) {
     el.resultsList.innerHTML = '';
     const fragment = document.createDocumentFragment();
 
-    fragment.appendChild(buildStatCardsRow(steelWeight, steelArea, woodArea, woodVolume));
-    const { badgeEl, setActiveView, wire } = buildCuttingDualBadge(plans, optimizedPlans);
-    const cuttingSection = makeCollapsible(
-        'Kế hoạch cắt sắt',
-        body => wire(buildCuttingPlansContent(body, plans, optimizedPlans, setActiveView)),
-        false,
-        badgeEl,
-    );
+    fragment.appendChild(buildStatCardsRow(steelWeight, steelArea, aluWeight, aluArea));
+    const cuttingSection = makeSection(body => buildCuttingPlansContent(body, plans));
     cuttingSection.dataset.section = 'cutting';
     fragment.appendChild(cuttingSection);
-    fragment.appendChild(makeCollapsible('Yêu cầu sơn sắt', body => { body.appendChild(buildPowderCoatingContent(powderCoating)); }, false));
-    fragment.appendChild(makeCollapsible('Yêu cầu sơn gỗ', body => { body.appendChild(buildPowderCoatingContent(woodPainting)); }, false));
 
     el.resultsList.appendChild(fragment);
     onExportEnabled(plans.length > 0);
 }
 
-function buildStatCardsRow(steelWeight, steelArea, woodArea, woodVolume) {
+function buildStatCardsRow(steelWeight, steelArea, aluWeight, aluArea) {
     const row = document.createElement('div');
     row.className = 'summary-stats';
 
     const cards = [
         { label: 'Trọng lượng sắt', value: areaFormatter.format(steelWeight), unit: 'kg' },
         { label: 'Diện tích sắt', value: areaFormatter.format(steelArea), unit: 'm²' },
-        { label: 'Diện tích gỗ', value: areaFormatter.format(woodArea), unit: 'm²' },
-        { label: 'Thể tích gỗ', value: areaFormatter.format(woodVolume), unit: 'm³' },
+        { label: 'Trọng lượng nhôm', value: areaFormatter.format(aluWeight), unit: 'kg' },
+        { label: 'Diện tích nhôm', value: areaFormatter.format(aluArea), unit: 'm²' },
     ];
 
     for (const card of cards) {
@@ -148,171 +139,26 @@ function buildStatCardsRow(steelWeight, steelArea, woodArea, woodVolume) {
     return row;
 }
 
-function buildCuttingDualBadge(plans, optimizedPlans) {
-    const container = document.createElement('div');
-    container.className = 'collapsible-waste-badges';
+function makeSection(buildBody) {
+    const section = document.createElement('div');
+    section.className = 'results-collapsible';
 
-    const slider = document.createElement('div');
-    slider.className = 'collapsible-waste-badge-slider';
-    container.appendChild(slider);
+    buildBody(section);
 
-    const allOk = plans.some(p => p.result) && plans.every(p => !p.result || p.result.percentage_wasted < WASTE_ALERT_PCT);
-    const beforeBadge = makeSingleWasteBadge(plans, 'Gốc');
-    if (beforeBadge && allOk) beforeBadge.classList.add('collapsible-waste-badge--ok');
-    const afterBadge = optimizedPlans
-        ? makeSingleWasteBadge(optimizedPlans, 'Tối ưu')
-        : plans.length > 0 ? makeLoadingBadge('Tối ưu: đang tính…') : null;
-    if (afterBadge) afterBadge.classList.add('collapsible-waste-badge--optimized', 'collapsible-waste-badge--inactive');
-
-    if (beforeBadge) container.appendChild(beforeBadge);
-    if (afterBadge) container.appendChild(afterBadge);
-
-    if (container.children.length === 1) return { badgeEl: null, setActiveView: () => { }, wire: fn => fn };
-
-    const group = document.createElement('div');
-    group.className = 'collapsible-waste-badge-group';
-    const label = document.createElement('span');
-    label.className = 'collapsible-waste-label';
-    label.textContent = 'Hao hụt';
-    group.appendChild(label);
-    group.appendChild(container);
-
-    function positionSlider(badge) {
-        slider.style.width = badge.offsetWidth + 'px';
-        slider.style.transform = `translateX(${badge.offsetLeft - 3}px)`;
-    }
-
-    function setActiveView(view) {
-        const isAfter = view === 'after';
-        beforeBadge?.classList.toggle('collapsible-waste-badge--inactive', isAfter);
-        afterBadge?.classList.toggle('collapsible-waste-badge--inactive', !isAfter);
-        slider.classList.toggle('collapsible-waste-badge-slider--optimized', isAfter || (!isAfter && allOk));
-        positionSlider(isAfter ? afterBadge : beforeBadge);
-    }
-
-    function wire(switchView) {
-        beforeBadge?.classList.add('collapsible-waste-badge--clickable');
-        afterBadge?.classList.add('collapsible-waste-badge--clickable');
-        beforeBadge?.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); switchView('before'); });
-        afterBadge?.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); switchView('after'); });
-
-        requestAnimationFrame(() => {
-            slider.style.transition = 'none';
-            positionSlider(beforeBadge);
-            slider.classList.toggle('collapsible-waste-badge-slider--optimized', allOk);
-            requestAnimationFrame(() => { slider.style.transition = ''; });
-        });
-    }
-
-    return { badgeEl: group, setActiveView, wire };
+    return section;
 }
 
-function makeSingleWasteBadge(plans, label) {
-    const { calcSteelWeightPerUnit } = window.BomParser;
-    let totalWasteKg = 0;
-    let totalStockKg = 0;
-
-    for (const plan of plans) {
-        if (!plan.result) continue;
-        const kgPerMm = calcSteelWeightPerUnit({
-            box_width: plan.material.box_width,
-            box_height: plan.material.box_length,
-            length: 1,
-            thickness: plan.material.thickness,
-            shape: plan.material.shape,
-            type: plan.material.type,
-        });
-        totalWasteKg += kgPerMm * Number(plan.result.total_waste || 0);
-        totalStockKg += kgPerMm * Number(plan.result.stock_qty || 0) * Number(plan.input.stock_length || 0);
-    }
-
-    if (!totalStockKg) return null;
-
-    const wastePct = (totalWasteKg / totalStockKg) * 100;
-    const badge = document.createElement('span');
-    badge.className = 'collapsible-waste-badge';
-    badge.textContent = `${label}: ${areaFormatter.format(totalWasteKg)} kg (${wastePct.toFixed(2)}%)`;
-    return badge;
-}
-
-function makeLoadingBadge(text) {
-    const badge = document.createElement('span');
-    badge.className = 'collapsible-waste-badge collapsible-waste-badge--loading';
-    badge.textContent = text;
-    return badge;
-}
-
-function buildOptimizingState() {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'optimizing-state';
-    wrapper.innerHTML = `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-        </svg>
-        <span>Đang tính toán kế hoạch tối ưu…</span>`;
-    return wrapper;
-}
-
-function makeCollapsible(titleText, buildBody, defaultOpen = true, badge = null) {
-    const details = document.createElement('details');
-    details.className = 'results-collapsible';
-    details.open = defaultOpen;
-
-    const summary = document.createElement('summary');
-    summary.className = 'results-collapsible-header';
-    summary.innerHTML = `
-        <span class="toggle-icon" aria-hidden="true">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-        </span>`;
-    const titleEl = document.createElement('span');
-    titleEl.textContent = titleText;
-    summary.appendChild(titleEl);
-    if (badge) summary.appendChild(badge);
-    details.appendChild(summary);
-
-    const body = document.createElement('div');
-    body.className = 'results-collapsible-body';
-    buildBody(body);
-    details.appendChild(body);
-
-    return details;
-}
-
-function buildCuttingPlansContent(body, plans, optimizedPlans, setActiveView) {
+function buildCuttingPlansContent(body, plans) {
     if (!plans.length) {
         const empty = document.createElement('p');
         empty.className = 'results-section-empty';
         empty.textContent = 'Không tìm thấy nhóm vật liệu nào đủ dữ liệu.';
         body.appendChild(empty);
-        return view => { };
+        return;
     }
 
-    const beforeSection = document.createElement('div');
-    buildCuttingPlanList(beforeSection, plans);
-    body.appendChild(beforeSection);
-
-    const afterSection = document.createElement('div');
-    afterSection.hidden = true;
-    if (optimizedPlans) {
-        const readyPlans = optimizedPlans.filter(Boolean);
-        if (readyPlans.length) buildCuttingPlanList(afterSection, readyPlans);
-        if (optimizedPlans.some(p => p === null)) afterSection.appendChild(buildOptimizingState());
-    } else {
-        afterSection.appendChild(buildOptimizingState());
-    }
-    body.appendChild(afterSection);
-
-    return function switchView(view) {
-        beforeSection.hidden = view === 'after';
-        afterSection.hidden = view === 'before';
-        setActiveView(view);
-    };
+    buildCuttingPlanList(body, plans);
 }
-
 
 function buildCuttingPlanList(container, plans) {
     const sortedPlans = plans.slice().sort((a, b) =>
@@ -320,14 +166,12 @@ function buildCuttingPlanList(container, plans) {
     );
 
     for (const plan of sortedPlans) {
-        const isAlert = !plan.error && plan.result?.percentage_wasted >= WASTE_ALERT_PCT;
-
         const detail = document.createElement('details');
-        detail.className = 'material-details' + (isAlert ? ' material-details--alert' : '');
+        detail.className = 'material-details';
 
         const summary = document.createElement('summary');
         summary.appendChild(buildSummaryText(plan));
-        summary.appendChild(buildSummaryBadges(plan, isAlert));
+        summary.appendChild(buildSummaryBadges(plan));
         detail.appendChild(summary);
 
         const bodyEl = document.createElement('div');
@@ -338,7 +182,7 @@ function buildCuttingPlanList(container, plans) {
         } else if (!plan.result) {
             bodyEl.appendChild(buildLoadingBlock());
         } else {
-            bodyEl.appendChild(buildPatternBlock(plan, isAlert));
+            bodyEl.appendChild(buildPatternBlock(plan));
         }
         detail.appendChild(bodyEl);
         container.appendChild(detail);
@@ -367,7 +211,7 @@ function buildSummaryText(plan) {
     return wrapper;
 }
 
-function buildSummaryBadges(plan, isAlert) {
+function buildSummaryBadges(plan) {
     const badges = document.createElement('div');
     badges.className = 'summary-badges summary-badges--text';
 
@@ -392,7 +236,7 @@ function buildSummaryBadges(plan, isAlert) {
         stockLen.textContent = formatNumber(plan.displayStockLength ?? plan.input.stock_length);
 
         const badge = document.createElement('span');
-        badge.className = 'waste-badge' + (isAlert ? ' waste-badge--alert' : ' waste-badge--ok');
+        badge.className = 'waste-badge';
         badge.appendChild(stockQty);
         badge.appendChild(document.createTextNode(' thanh '));
         badge.appendChild(stockLen);
@@ -431,7 +275,7 @@ function buildSourceBlock(plan) {
     return block;
 }
 
-function buildPatternBlock(plan, materialIsAlert = false) {
+function buildPatternBlock(plan) {
     const block = document.createElement('section');
     block.className = 'pattern-block';
 
@@ -451,11 +295,6 @@ function buildPatternBlock(plan, materialIsAlert = false) {
     }
 
     for (const pattern of patterns) {
-        const patternWastePct = plan.input.stock_length > 0
-            ? (pattern.waste / plan.input.stock_length) * 100
-            : 0;
-        const patternAlert = materialIsAlert && patternWastePct >= WASTE_ALERT_PCT;
-
         const patternCodes = new Map();
         lengths.forEach((length, i) => {
             if (Number(pattern.counts?.[i] || 0) > 0) {
@@ -466,7 +305,7 @@ function buildPatternBlock(plan, materialIsAlert = false) {
         });
 
         const item = document.createElement('li');
-        item.className = 'pattern-item' + (patternAlert ? ' pattern-item--alert' : '');
+        item.className = 'pattern-item';
 
         const head = document.createElement('div');
         head.className = 'pattern-head';
@@ -497,7 +336,7 @@ function buildPatternBlock(plan, materialIsAlert = false) {
         const foot = document.createElement('div');
         foot.className = 'pattern-foot';
         const waste = document.createElement('span');
-        waste.className = 'waste-tag' + (patternAlert ? ' waste-tag--alert' : '');
+        waste.className = 'waste-tag';
         waste.textContent = `hao hụt ${formatNumber(pattern.waste)} mm / ${formatNumber(plan.displayStockLength ?? plan.input.stock_length)} mm`;
         foot.appendChild(waste);
 
@@ -510,35 +349,6 @@ function buildPatternBlock(plan, materialIsAlert = false) {
     block.appendChild(title);
     block.appendChild(list);
     return block;
-}
-
-function buildPowderCoatingContent(powderCoating) {
-    if (!powderCoating.length) {
-        const empty = document.createElement('p');
-        empty.className = 'results-section-empty';
-        empty.textContent = 'Không tìm thấy dữ liệu mã màu trong file.';
-        return empty;
-    }
-
-    const table = document.createElement('table');
-    table.className = 'coating-table';
-    const thead = document.createElement('thead');
-    thead.innerHTML = `<tr><th>Mã màu</th><th>Diện tích (m²)</th></tr>`;
-    table.appendChild(thead);
-
-    const tbody = document.createElement('tbody');
-    for (const { code, area } of powderCoating) {
-        const tr = document.createElement('tr');
-        const tdCode = document.createElement('td');
-        tdCode.textContent = code;
-        const tdArea = document.createElement('td');
-        tdArea.textContent = areaFormatter.format(area);
-        tr.appendChild(tdCode);
-        tr.appendChild(tdArea);
-        tbody.appendChild(tr);
-    }
-    table.appendChild(tbody);
-    return table;
 }
 
 // ── State / status ─────────────────────────────────────────────────────────────
@@ -623,21 +433,14 @@ export function setStatus(element, kind, text) {
     element.textContent = text;
 }
 
-// ── Targeted section refresh (called after async optimization completes) ───────
+// ── Targeted section refresh (called after async cutting-plan computation completes) ───
 
 export function refreshCuttingSection(viewModel) {
-    const { plans, optimizedPlans } = viewModel;
+    const { plans } = viewModel;
     const existing = el.resultsList.querySelector('[data-section="cutting"]');
     if (!existing) return;
 
-    const wasOpen = existing.open;
-    const { badgeEl, setActiveView, wire } = buildCuttingDualBadge(plans, optimizedPlans);
-    const next = makeCollapsible(
-        'Kế hoạch cắt sắt',
-        body => wire(buildCuttingPlansContent(body, plans, optimizedPlans, setActiveView)),
-        wasOpen,
-        badgeEl,
-    );
+    const next = makeSection(body => buildCuttingPlansContent(body, plans));
     next.dataset.section = 'cutting';
     existing.replaceWith(next);
 }
@@ -651,8 +454,7 @@ export function materialLabel(material) {
     const boxW = material?.box_width || null;
     const dim = boxL || boxW ? `${boxL}x${boxW}` : null;
     const thickness = material?.thickness != null ? `${material.thickness} mm` : null;
-    const cut = material?.cut || null;
-    const parts = [type, shape, dim, thickness, cut].filter(Boolean);
+    const parts = [type, shape, dim, thickness].filter(Boolean);
     return (parts.length ? parts.join(' · ') : 'Vật liệu').toLocaleLowerCase('vi');
 }
 

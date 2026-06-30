@@ -1,6 +1,5 @@
 import init, {
     compute_cutting_plan_numeric,
-    compute_optimal_stock_cutting_plan_numeric,
 } from '../shared/lib/pkg/steel_cutting_wasm.js';
 
 init()
@@ -19,15 +18,5 @@ self.onmessage = ({ data }) => {
             error = err?.message || String(err);
         }
         postMessage({ type: 'planResult', runId, index, result, error });
-
-    } else if (type === 'computeOptimalPlan') {
-        let optResult = null;
-        let error = null;
-        try {
-            optResult = compute_optimal_stock_cutting_plan_numeric(data.optInput);
-        } catch (err) {
-            error = err?.message || String(err);
-        }
-        postMessage({ type: 'optimalPlanResult', runId, index, optResult, error });
     }
 };
