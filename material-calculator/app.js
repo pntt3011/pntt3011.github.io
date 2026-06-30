@@ -8,6 +8,7 @@ const state = {
     parsedCache: null,
     validation: [],
     productConfigs: {},
+    partMethods: {},
     viewModel: null,
     pendingPlans: 0,
 };
@@ -32,7 +33,6 @@ function cacheElements() {
     elements.resultsPanelTitle = document.getElementById('resultsPanelTitle');
     elements.productListSection = document.getElementById('productListSection');
     elements.productList = document.getElementById('productList');
-    elements.productCount = document.getElementById('productCount');
     elements.calculateButton = document.getElementById('calculateButton');
 }
 
@@ -72,11 +72,11 @@ async function loadData() {
     state.parsedCache = null;
     state.validation = [];
     state.productConfigs = {};
+    state.partMethods = {};
     state.viewModel = null;
     setExportEnabled(false);
 
     elements.productList.innerHTML = '';
-    elements.productCount.textContent = '';
     elements.productListSection.hidden = true;
     elements.calculateButton.disabled = true;
     Render.renderEmptyState('Đang tải dữ liệu', 'Hệ thống đang gom dữ liệu BOM.');
@@ -85,12 +85,13 @@ async function loadData() {
         const response = await fetch('./data.json');
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const result = await response.json();
+        result.products = result.products.filter(p => p.components?.some(c => c.kind === 'steel'));
 
         state.parsedCache = result;
         state.validation = result.validation ?? [];
 
         for (const product of state.parsedCache.products) {
-            state.productConfigs[product.id] = { qty: product.qty ?? 0, enabled: true };
+            state.productConfigs[product.id] = { qty: product.qty ?? 0, enabled: false };
         }
 
         runCalculation();
@@ -108,7 +109,7 @@ function runCalculation() {
     state.optimizationId = (state.optimizationId ?? 0) + 1;
     const runId = state.optimizationId;
 
-    state.viewModel = buildViewModel(state.parsedCache, state.productConfigs);
+    state.viewModel = buildViewModel(state.parsedCache, state.productConfigs, state.partMethods);
 
     Render.renderProducts(state.viewModel.products, {
         onToggle: (id, enabled) => {
@@ -118,6 +119,15 @@ function runCalculation() {
         onQtyChange: (id, qty) => {
             const cfg = state.productConfigs[id] ?? { qty: 0, enabled: true };
             state.productConfigs[id] = { ...cfg, qty };
+        },
+        onGroupToggle: (ids, enabled) => {
+            for (const id of ids) {
+                const cfg = state.productConfigs[id] ?? { qty: 0, enabled: true };
+                state.productConfigs[id] = { ...cfg, enabled };
+            }
+        },
+        onMethodChange: (key, method) => {
+            state.partMethods[key] = method;
         },
     });
 

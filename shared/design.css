@@ -56,7 +56,7 @@ button, input, select { font: inherit; }
 .status-pill--error   { background: #fee2e2; color: #991b1b; }
 
 /* ── Form controls ── */
-input, select {
+input:not([type="checkbox"]):not([type="radio"]), select {
   width: 100%;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
@@ -66,9 +66,9 @@ input, select {
   transition: border-color .15s ease, background .15s ease;
   appearance: auto;
 }
-input:hover:not(:disabled),
+input:not([type="checkbox"]):not([type="radio"]):hover:not(:disabled),
 select:hover:not(:disabled) { border-color: #b0b8c8; background: #fff; }
-input:focus,
+input:not([type="checkbox"]):not([type="radio"]):focus,
 select:focus {
   outline: none;
   border-color: var(--accent);

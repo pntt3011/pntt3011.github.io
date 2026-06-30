@@ -9,9 +9,14 @@ export function init(elements) {
     el = elements;
 }
 
+// Collapse state persists across re-renders (e.g. clicking "Tính toán"), keyed by
+// order name for groups and product id for per-product parts sections.
+const groupExpandedState = new Map();
+const productExpandedState = new Map();
+
 // ── Product list ───────────────────────────────────────────────────────────────
 
-export function renderProducts(products, { onToggle, onQtyChange }) {
+export function renderProducts(products, { onToggle, onQtyChange, onGroupToggle, onMethodChange }) {
     if (!products.length) {
         el.productList.innerHTML = '';
         el.productListSection.hidden = true;
@@ -19,19 +24,136 @@ export function renderProducts(products, { onToggle, onQtyChange }) {
     }
 
     el.productListSection.hidden = false;
-    el.productCount.textContent = `${products.length} sản phẩm`;
     el.productList.innerHTML = '';
 
-    const fragment = document.createDocumentFragment();
+    const groups = new Map();
     for (const product of products) {
-        fragment.appendChild(buildProductItem(product, { onToggle, onQtyChange }));
+        const key = product.order_name ?? '';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(product);
+    }
+
+    const fragment = document.createDocumentFragment();
+    for (const [orderName, groupProducts] of groups) {
+        const itemCheckboxes = [];
+        const itemsContainer = document.createElement('div');
+        itemsContainer.className = 'product-group-items';
+
+        let groupCheckbox = null;
+        const syncGroupCheckbox = () => {
+            if (!groupCheckbox) return;
+            const allEnabled = itemCheckboxes.every(cb => cb.checked);
+            const someEnabled = itemCheckboxes.some(cb => cb.checked);
+            groupCheckbox.checked = allEnabled;
+            groupCheckbox.indeterminate = !allEnabled && someEnabled;
+        };
+
+        if (orderName) {
+            const header = buildGroupHeader(orderName, groupProducts, {
+                onGroupToggle,
+                onGroupCheckboxChange: checked => {
+                    for (const cb of itemCheckboxes) {
+                        if (cb.checked !== checked) {
+                            cb.checked = checked;
+                            cb.dispatchEvent(new Event('change'));
+                        }
+                    }
+                },
+                itemsContainer,
+            });
+            groupCheckbox = header.querySelector('.product-group-checkbox');
+            fragment.appendChild(header);
+        }
+
+        for (const product of groupProducts) {
+            const item = buildProductItem(product, { onToggle, onQtyChange, onAfterToggle: syncGroupCheckbox, onMethodChange });
+            const checkbox = item.querySelector('.product-checkbox');
+            itemCheckboxes.push(checkbox);
+            itemsContainer.appendChild(item);
+        }
+
+        fragment.appendChild(itemsContainer);
     }
     el.productList.appendChild(fragment);
 }
 
-function buildProductItem(product, { onToggle, onQtyChange }) {
+function buildGroupHeader(orderName, groupProducts, { onGroupToggle, onGroupCheckboxChange, itemsContainer }) {
+    const header = document.createElement('div');
+    header.className = 'product-group-header';
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'product-group-collapse';
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg>';
+
+    const expanded = groupExpandedState.get(orderName) ?? false;
+    itemsContainer.hidden = !expanded;
+    toggle.setAttribute('aria-expanded', String(expanded));
+    const toggleCollapse = () => {
+        const nowExpanded = itemsContainer.hidden;
+        itemsContainer.hidden = !nowExpanded;
+        toggle.setAttribute('aria-expanded', String(nowExpanded));
+        groupExpandedState.set(orderName, nowExpanded);
+    };
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'product-group-checkbox';
+    const allEnabled = groupProducts.every(p => p.enabled);
+    const someEnabled = groupProducts.some(p => p.enabled);
+    checkbox.checked = allEnabled;
+    checkbox.indeterminate = !allEnabled && someEnabled;
+    checkbox.addEventListener('change', () => {
+        onGroupToggle(groupProducts.map(p => p.id ?? p.sheetName), checkbox.checked);
+        onGroupCheckboxChange(checkbox.checked);
+    });
+    checkbox.addEventListener('click', e => e.stopPropagation());
+
+    const label = document.createElement('span');
+    label.className = 'product-group-title';
+    label.textContent = formatOrderName(orderName);
+
+    header.appendChild(toggle);
+    header.appendChild(checkbox);
+    header.appendChild(label);
+    header.addEventListener('click', e => {
+        if (e.target === checkbox) return;
+        toggleCollapse();
+    });
+    return header;
+}
+
+function buildProductItem(product, { onToggle, onQtyChange, onAfterToggle, onMethodChange }) {
     const item = document.createElement('div');
     item.className = 'product-item' + (product.enabled ? '' : ' product-item--disabled');
+
+    const row = document.createElement('div');
+    row.className = 'product-item-row';
+
+    const productKey = product.id ?? product.sheetName;
+    const hasParts = product.parts.length > 0;
+    let partsContainer = null;
+
+    if (hasParts) {
+        partsContainer = buildProductParts(product.parts, { onMethodChange });
+        const expanded = productExpandedState.get(productKey) ?? false;
+        partsContainer.hidden = !expanded;
+    }
+
+    const collapseToggle = document.createElement('button');
+    collapseToggle.type = 'button';
+    collapseToggle.className = 'product-item-collapse';
+    collapseToggle.setAttribute('aria-expanded', String(!!partsContainer && !partsContainer.hidden));
+    collapseToggle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg>';
+    if (!hasParts) collapseToggle.disabled = true;
+    collapseToggle.addEventListener('click', () => {
+        if (!partsContainer) return;
+        const nowExpanded = partsContainer.hidden;
+        partsContainer.hidden = !nowExpanded;
+        collapseToggle.setAttribute('aria-expanded', String(nowExpanded));
+        productExpandedState.set(productKey, nowExpanded);
+    });
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
@@ -40,6 +162,7 @@ function buildProductItem(product, { onToggle, onQtyChange }) {
     checkbox.addEventListener('change', () => {
         item.classList.toggle('product-item--disabled', !checkbox.checked);
         onToggle(product.id ?? product.sheetName, checkbox.checked);
+        if (onAfterToggle) onAfterToggle();
     });
 
     const info = document.createElement('div');
@@ -51,9 +174,7 @@ function buildProductItem(product, { onToggle, onQtyChange }) {
 
     const metaEl = document.createElement('div');
     metaEl.className = 'product-meta';
-    metaEl.textContent = product.order_name
-        ? `${product.code} (${formatOrderName(product.order_name)})`
-        : product.code;
+    metaEl.textContent = product.code;
 
     info.appendChild(nameEl);
     info.appendChild(metaEl);
@@ -80,10 +201,68 @@ function buildProductItem(product, { onToggle, onQtyChange }) {
     qtyControl.appendChild(qtyLabel);
     qtyControl.appendChild(qtyInput);
 
-    item.appendChild(checkbox);
-    item.appendChild(info);
-    item.appendChild(qtyControl);
+    row.appendChild(collapseToggle);
+    row.appendChild(checkbox);
+    row.appendChild(info);
+    row.appendChild(qtyControl);
+    item.appendChild(row);
+
+    if (partsContainer) {
+        item.appendChild(partsContainer);
+    }
+
     return item;
+}
+
+function buildProductParts(parts, { onMethodChange }) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'product-parts';
+
+    for (const part of parts) {
+        const partRow = document.createElement('div');
+        partRow.className = 'product-part-row';
+
+        const info = document.createElement('div');
+        info.className = 'product-part-info';
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'product-part-name';
+        nameEl.textContent = part.name || partMeta(part);
+
+        const metaEl = document.createElement('div');
+        metaEl.className = 'product-part-meta';
+        metaEl.textContent = partMeta(part);
+
+        info.appendChild(nameEl);
+        info.appendChild(metaEl);
+        partRow.appendChild(info);
+
+        const methodToggle = document.createElement('button');
+        methodToggle.type = 'button';
+        methodToggle.className = 'method-toggle';
+        methodToggle.dataset.method = part.method;
+        methodToggle.textContent = part.method;
+        methodToggle.addEventListener('click', () => {
+            const nextMethod = part.method === 'LZ' ? 'CNC' : 'LZ';
+            part.method = nextMethod;
+            methodToggle.dataset.method = nextMethod;
+            methodToggle.textContent = nextMethod;
+            onMethodChange(part.key, nextMethod);
+        });
+        partRow.appendChild(methodToggle);
+
+        wrapper.appendChild(partRow);
+    }
+
+    return wrapper;
+}
+
+function partMeta(part) {
+    const dim = part.box_width && part.box_height ? `${part.box_width}x${part.box_height}` : null;
+    const length = part.length != null ? `L${part.length}` : null;
+    const thickness = part.thickness != null ? `${part.thickness}mm` : null;
+    const segments = [part.shape, part.type, dim, length, thickness].filter(Boolean);
+    return segments.join(' · ');
 }
 
 // ── Results panel ──────────────────────────────────────────────────────────────
@@ -286,8 +465,29 @@ function buildPatternBlock(plan) {
     const list = document.createElement('ul');
     list.className = 'pattern-list';
 
-    const patterns = Array.isArray(plan.result.patterns) ? plan.result.patterns : [];
+    const rawPatterns = Array.isArray(plan.result.patterns) ? plan.result.patterns : [];
     const lengths = Array.isArray(plan.result.lengths) ? plan.result.lengths : [];
+    const bundleSize = Number(plan.input?.bundle_size) || 1;
+
+    const patterns = rawPatterns.flatMap(pattern => {
+        if (!pattern.is_secondary || bundleSize <= 1) {
+            return [{ ...pattern, manual: pattern.is_secondary && pattern.qty < bundleSize }];
+        }
+        if (pattern.qty < bundleSize) {
+            return [{ ...pattern, manual: true }];
+        }
+
+        const bundledQty = Math.floor(pattern.qty / bundleSize) * bundleSize;
+        const remainderQty = pattern.qty % bundleSize;
+        const rows = [];
+        if (bundledQty > 0) {
+            rows.push({ ...pattern, qty: bundledQty, manual: false });
+        }
+        if (remainderQty > 0) {
+            rows.push({ ...pattern, qty: remainderQty, manual: true });
+        }
+        return rows;
+    });
 
     const lengthToProductCodes = new Map();
     for (const usage of plan.material.usage || []) {
@@ -319,6 +519,12 @@ function buildPatternBlock(plan) {
         const meta = document.createElement('div');
         meta.className = 'pattern-meta';
         meta.innerHTML = `<span class="pattern-qty">× ${formatNumber(pattern.qty)}</span>`;
+        if (plan.material.method === 'CNC' && pattern.manual) {
+            const manualTag = document.createElement('span');
+            manualTag.className = 'pattern-manual-tag';
+            manualTag.textContent = 'cắt cơ';
+            meta.appendChild(manualTag);
+        }
 
         head.appendChild(name);
         head.appendChild(meta);
@@ -455,7 +661,8 @@ export function materialLabel(material) {
     const dim = boxL || boxW ? `${boxL}x${boxW}` : null;
     const thickness = material?.thickness != null ? `${material.thickness} mm` : null;
     const parts = [type, shape, dim, thickness].filter(Boolean);
-    return (parts.length ? parts.join(' · ') : 'Vật liệu').toLocaleLowerCase('vi');
+    const label = (parts.length ? parts.join(' · ') : 'Vật liệu').toLocaleLowerCase('vi');
+    return material?.method ? `${label} · ${material.method}` : label;
 }
 
 function formatOrderName(order_name) {
