@@ -5,6 +5,9 @@ const STOCK_DISPLAY_OFFSET = 50;
 const DEFAULT_MAX_PATTERN_WASTE = 600;
 const DEFAULT_METHOD = 'LZ';
 const DEFAULT_BUNDLE_SIZE = 1;
+const SHEET_WIDTH = 1200;
+const SHEET_HEIGHT = 2500;
+const SHEET_AREA = (SHEET_WIDTH * SHEET_HEIGHT) / 1e6;
 
 // CNC bundle size (qty / lần) by shape + dimension, from the machine's cut sheet.
 const CNC_BUNDLE_SIZES = {
@@ -27,6 +30,18 @@ const CNC_BUNDLE_SIZES = {
     'ong:12.7x12.7': 74,
     'ong:13.8x13.8': 60,
 };
+
+// Collapse steel sub-types (sắt đen, sắt kẽm, ...) into one group; keep other
+// material types (e.g. nhôm) distinct.
+function materialTypeGroup(type) {
+    const { normalize } = window.BomParser;
+    const normalized = normalize(type ?? '');
+    return normalized.startsWith('sat') ? 'sat' : normalized;
+}
+
+function isSteelTypeGroup(types) {
+    return Array.from(types).some(type => materialTypeGroup(type) === 'sat');
+}
 
 function bundleSizeKey(shape, boxWidth, boxHeight) {
     const { normalize } = window.BomParser;
@@ -65,6 +80,7 @@ export function buildViewModel(parsedResult, productConfigs, partMethods = {}) {
         products: productItems,
         ...aggregateSummary(products, productConfigs),
         ...aggregateCuttingPlan(products, productConfigs, partMethods),
+        flatSheetPlans: aggregateFlatSheetPlan(products, productConfigs),
     };
 }
 
@@ -136,7 +152,7 @@ function aggregateCuttingPlan(products, productConfigs, partMethods = {}) {
                 const key = JSON.stringify([
                     part.box_width,
                     part.box_height,
-                    normalize(part.type ?? ''),
+                    materialTypeGroup(part.type),
                     normalize(part.shape ?? ''),
                     part.thickness,
                     method,
@@ -146,7 +162,7 @@ function aggregateCuttingPlan(products, productConfigs, partMethods = {}) {
                     grouped.set(key, {
                         box_width: part.box_width,
                         box_length: part.box_height,
-                        type: part.type,
+                        types: new Set(),
                         shape: part.shape,
                         thickness: part.thickness,
                         method,
@@ -155,6 +171,7 @@ function aggregateCuttingPlan(products, productConfigs, partMethods = {}) {
                 }
 
                 const group = grouped.get(key);
+                group.types.add(part.type);
                 const totalQty = Math.round(part.qty * qty);
                 if (totalQty <= 0) continue;
 
@@ -173,7 +190,7 @@ function aggregateCuttingPlan(products, productConfigs, partMethods = {}) {
         .map(item => ({
             box_width: item.box_width,
             box_length: item.box_length,
-            type: item.type,
+            type: isSteelTypeGroup(item.types) ? 'sắt' : item.types.values().next().value,
             shape: item.shape,
             thickness: item.thickness,
             method: item.method,
@@ -230,4 +247,65 @@ function computeMaterialPlan(material) {
         sourceCount: material.usage.length,
         requiredTotal: quantities.reduce((sum, q) => sum + q, 0),
     };
+}
+
+// ── Flat sheet (La Dẹt) plan ────────────────────────────────────────────────────
+
+function aggregateFlatSheetPlan(products, productConfigs) {
+    const { normalize } = window.BomParser;
+    const grouped = new Map();
+
+    for (const product of products) {
+        const qty = getEnabledQty(product, productConfigs);
+        if (!qty) continue;
+
+        for (const component of product.components) {
+            if (component.kind !== 'steel') continue;
+
+            for (const part of component.parts) {
+                if (normalize(part.shape ?? '') !== 'la det') continue;
+                if (!part.length || !part.box_height || !part.qty) continue;
+
+                const thickness = part.thickness;
+                if (!grouped.has(thickness)) {
+                    grouped.set(thickness, {
+                        thickness,
+                        totalArea: 0,
+                        usageMap: new Map(),
+                    });
+                }
+
+                const group = grouped.get(thickness);
+                const totalQty = Math.round(part.qty * qty);
+                if (totalQty <= 0) continue;
+
+                const pieceArea = (part.box_height * part.length) / 1e6;
+                group.totalArea += pieceArea * totalQty;
+
+                const usageKey = `${part.box_height}x${part.length}`;
+                const existing = group.usageMap.get(usageKey);
+                if (!existing) {
+                    group.usageMap.set(usageKey, {
+                        box_height: part.box_height,
+                        length: part.length,
+                        qty: totalQty,
+                    });
+                } else {
+                    existing.qty += totalQty;
+                }
+            }
+        }
+    }
+
+    return Array.from(grouped.values())
+        .map(group => ({
+            thickness: group.thickness,
+            totalArea: group.totalArea,
+            sheetArea: SHEET_AREA,
+            sheetWidth: SHEET_WIDTH,
+            sheetHeight: SHEET_HEIGHT,
+            sheetCount: group.totalArea > 0 ? Math.ceil(group.totalArea / SHEET_AREA) : 0,
+            usage: Array.from(group.usageMap.values()).sort((a, b) => b.length - a.length),
+        }))
+        .sort((a, b) => (a.thickness ?? 0) - (b.thickness ?? 0));
 }

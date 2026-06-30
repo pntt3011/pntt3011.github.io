@@ -268,7 +268,7 @@ function partMeta(part) {
 // ── Results panel ──────────────────────────────────────────────────────────────
 
 export function renderResults(viewModel, { onExportEnabled }) {
-    const { order_name, plans, steelWeight, steelArea, aluWeight, aluArea } = viewModel;
+    const { order_name, plans, flatSheetPlans, steelWeight, steelArea, aluWeight, aluArea } = viewModel;
 
     if (el.resultsPanelTitle) {
         el.resultsPanelTitle.textContent = 'Thông tin lệnh sản xuất';
@@ -281,6 +281,12 @@ export function renderResults(viewModel, { onExportEnabled }) {
     const cuttingSection = makeSection(body => buildCuttingPlansContent(body, plans));
     cuttingSection.dataset.section = 'cutting';
     fragment.appendChild(cuttingSection);
+
+    if (flatSheetPlans && flatSheetPlans.length) {
+        const flatSheetSection = makeSection(body => buildFlatSheetPlanList(body, flatSheetPlans));
+        flatSheetSection.dataset.section = 'flat-sheet';
+        fragment.appendChild(flatSheetSection);
+    }
 
     el.resultsList.appendChild(fragment);
     onExportEnabled(plans.length > 0);
@@ -366,6 +372,87 @@ function buildCuttingPlanList(container, plans) {
         detail.appendChild(bodyEl);
         container.appendChild(detail);
     }
+}
+
+function buildFlatSheetPlanList(container, flatSheetPlans) {
+    for (const sheetPlan of flatSheetPlans) {
+        const detail = document.createElement('details');
+        detail.className = 'material-details';
+
+        const summary = document.createElement('summary');
+        summary.appendChild(buildFlatSheetSummaryText(sheetPlan));
+        summary.appendChild(buildFlatSheetSummaryBadges(sheetPlan));
+        detail.appendChild(summary);
+
+        const bodyEl = document.createElement('div');
+        bodyEl.className = 'material-body';
+        bodyEl.appendChild(buildFlatSheetSourceBlock(sheetPlan));
+        detail.appendChild(bodyEl);
+
+        container.appendChild(detail);
+    }
+}
+
+function buildFlatSheetSummaryText(sheetPlan) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'summary-left';
+
+    const toggle = document.createElement('span');
+    toggle.className = 'toggle-icon';
+    toggle.setAttribute('aria-hidden', 'true');
+    toggle.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+    `;
+
+    const title = document.createElement('div');
+    title.className = 'material-title';
+    title.textContent = `sắt tấm · ${sheetPlan.thickness} mm`;
+
+    wrapper.appendChild(toggle);
+    wrapper.appendChild(title);
+    return wrapper;
+}
+
+function buildFlatSheetSummaryBadges(sheetPlan) {
+    const badges = document.createElement('div');
+    badges.className = 'summary-badges summary-badges--text';
+
+    const sheetQty = document.createElement('strong');
+    sheetQty.className = 'summary-number';
+    sheetQty.textContent = formatNumber(sheetPlan.sheetCount);
+
+    const badge = document.createElement('span');
+    badge.className = 'waste-badge';
+    badge.appendChild(sheetQty);
+    badge.appendChild(document.createTextNode(` tấm ${formatNumber(sheetPlan.sheetWidth)}x${formatNumber(sheetPlan.sheetHeight)} mm`));
+    badges.appendChild(badge);
+
+    return badges;
+}
+
+function buildFlatSheetSourceBlock(sheetPlan) {
+    const block = document.createElement('section');
+    block.className = 'source-block';
+
+    const title = document.createElement('div');
+    title.className = 'block-title';
+    title.textContent = `Số lượng cần cắt (tổng ${areaFormatter.format(sheetPlan.totalArea)} m²)`;
+
+    const chips = document.createElement('div');
+    chips.className = 'chip-row';
+
+    for (const usage of sheetPlan.usage || []) {
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.textContent = `${formatNumber(usage.box_height)}x${formatNumber(usage.length)} mm × ${formatNumber(usage.qty)}`;
+        chips.appendChild(chip);
+    }
+
+    block.appendChild(title);
+    block.appendChild(chips);
+    return block;
 }
 
 function buildSummaryText(plan) {
