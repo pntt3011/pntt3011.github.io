@@ -1,9 +1,11 @@
 // ── Constants ────────────────────────────────────────────────────────────────
-const STEP_WIDTH = 5;
+const STEP_WIDTH = 4; // name, Hệ số, Định mức, Thời gian
 const DEFAULT_DATA_START_ROW = 19;
 
-const CD_SHEET_NAME = 'Bảng tra CĐ';
-const CD_DATA_START_ROW = 5; // 1-based, row 5 onward in the lookup sheet
+// Step names live in the "NHÓM CÔNG ĐOẠN" column of "Bảng tra V2", starting
+// the row after that header.
+const CD_SHEET_NAME = 'Bảng tra V2';
+const CD_STEP_HEADER = 'nhóm công đoạn';
 
 let CD_STEPS = [];
 let CD_STEP_COL = {};
@@ -15,16 +17,12 @@ function normalizeStepName(s) {
     .toLowerCase();
 }
 
-function loadStepsFromWorkbook(wb) {
-  const ws = wb.Sheets[CD_SHEET_NAME];
-  if (!ws) throw new Error(`Sheet "${CD_SHEET_NAME}" not found in input file.`);
-
-  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+function extractSteps(rows, startRow, col) {
   const seen = new Set();
   const steps = [];
 
-  for (let r = CD_DATA_START_ROW - 1; r < rows.length; r++) {
-    const raw = rows[r]?.[0];
+  for (let r = startRow; r < rows.length; r++) {
+    const raw = rows[r]?.[col];
     if (raw == null || raw === '') continue;
 
     const name = String(raw).replace(/\s+/g, ' ').trim();
@@ -34,6 +32,24 @@ function loadStepsFromWorkbook(wb) {
     seen.add(key);
     steps.push(name);
   }
+
+  return steps;
+}
+
+function loadStepsFromWorkbook(wb) {
+  const ws = wb.Sheets[CD_SHEET_NAME];
+  if (!ws) throw new Error(`Sheet "${CD_SHEET_NAME}" not found in input file.`);
+
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+  const headerRow = rows.find(row => (row ?? []).some(v => normText(v) === CD_STEP_HEADER));
+  const headerRowIdx = rows.indexOf(headerRow);
+
+  if (headerRowIdx < 0) {
+    throw new Error(`Could not find "NHÓM CÔNG ĐOẠN" column in sheet "${CD_SHEET_NAME}".`);
+  }
+
+  const stepCol = headerRow.findIndex(v => normText(v) === CD_STEP_HEADER);
+  const steps = extractSteps(rows, headerRowIdx + 1, stepCol);
 
   if (steps.length === 0) throw new Error(`No steps found in sheet "${CD_SHEET_NAME}".`);
 
@@ -209,8 +225,23 @@ function parseProduct(rows) {
     code: valueRightOfLabel(rows, ['Item Code:', 'Item Code :']),
     dai,
     rong,
-    cao
+    cao,
+    loaiGo: findLoaiGo(rows)
   };
+}
+
+// Newer sheets carry "Loại gỗ" as a label/value pair stacked two rows apart
+// in the same column. Older sheets instead had the value to the right of a
+// same-row "Kind of wood :" label.
+function findLoaiGo(rows) {
+  const hit = findCell(rows, v => normText(v) === 'loại gỗ');
+
+  if (hit) {
+    const value = rows[hit.r + 2]?.[hit.c];
+    if (value != null && value !== '') return value;
+  }
+
+  return valueRightOfLabel(rows, ['Kind of wood :', 'Kind of wood:']);
 }
 
 function findDimensionValues(rows) {
@@ -249,30 +280,32 @@ function findDimensionValues(rows) {
 // ── Layout detection ────────────────────────────────────────────────────────
 function detectLayout(rows) {
   const dataStartRow = findDataStartRow(rows);
-  const headerRowIdx = Math.max(0, dataStartRow - 2);
+  const headerRowIdx = findHeaderRowIdx(rows, dataStartRow);
   const headerRow = rows[headerRowIdx] ?? [];
 
   let ttCol = -1;
 
   for (let c = 0; c < headerRow.length; c++) {
-    if (normText(headerRow[c]) === 'tt') {
+    const t = normText(headerRow[c]);
+    if (t === 'tt' || t === 'stt') {
       ttCol = c;
       break;
     }
   }
 
-  let stepStartCol = ttCol >= 0 ? ttCol + 1 : -1;
+  // Scan from the first data row, not row 0 — process-group header labels
+  // above the data (e.g. "Ghép" as a section title) can coincidentally match
+  // a real step name. Take the minimum matching column across several data
+  // rows, since any single row may be missing its earliest step blocks.
+  let stepStartCol = -1;
 
-  if (stepStartCol < 0) {
-    outer:
-    for (let r = 0; r < Math.min(rows.length, 40); r++) {
-      const row = rows[r] ?? [];
+  for (let r = dataStartRow - 1; r < Math.min(rows.length, dataStartRow + 39); r++) {
+    const row = rows[r] ?? [];
 
-      for (let c = 0; c < row.length; c++) {
-        if (lookupStep(cellText(row[c]))) {
-          stepStartCol = c;
-          break outer;
-        }
+    for (let c = 0; c < row.length; c++) {
+      if (lookupStep(cellText(row[c]))) {
+        if (stepStartCol < 0 || c < stepStartCol) stepStartCol = c;
+        break;
       }
     }
   }
@@ -281,10 +314,43 @@ function detectLayout(rows) {
     throw new Error('Could not detect first step column.');
   }
 
+  let ghiChuCol = -1;
+
+  for (let c = 0; c < headerRow.length; c++) {
+    if (normText(headerRow[c]) === 'ghi chú') {
+      ghiChuCol = c;
+      break;
+    }
+  }
+
+  const preGhiChuCol = ghiChuCol > 0 ? ghiChuCol - 1 : -1;
+
+  let cumAttrCol = -1;
+
+  for (let c = 0; c < headerRow.length; c++) {
+    if (normText(headerRow[c]).startsWith('thuộc tính cụm')) {
+      cumAttrCol = c;
+      break;
+    }
+  }
+
+  let maCumChiTietCol = -1;
+
+  for (let c = 0; c < headerRow.length; c++) {
+    if (normText(headerRow[c]).startsWith('mã cụm')) {
+      maCumChiTietCol = c;
+      break;
+    }
+  }
+
   return {
     dataStartRow,
     ttCol,
-    stepStartCol
+    stepStartCol,
+    ghiChuCol,
+    preGhiChuCol,
+    cumAttrCol,
+    maCumChiTietCol
   };
 }
 
@@ -320,6 +386,21 @@ function findDataStartRow(rows) {
   return DEFAULT_DATA_START_ROW;
 }
 
+function findHeaderRowIdx(rows, dataStartRow) {
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r] ?? [];
+
+    if (
+      normText(row[0]) === 'stt' &&
+      normText(row[1]).includes('tên chi tiết')
+    ) {
+      return r;
+    }
+  }
+
+  return Math.max(0, dataStartRow - 2);
+}
+
 // ── Parts parser ────────────────────────────────────────────────────────────
 function parseParts(rows, srcSheet) {
   const parts = [];
@@ -328,6 +409,10 @@ function parseParts(rows, srcSheet) {
   const startRow = layout.dataStartRow;
   const stepStartCol = layout.stepStartCol;
   const codeCol = layout.ttCol;
+  const ghiChuCol = layout.ghiChuCol >= 0 ? layout.ghiChuCol : 13;
+  const preGhiChuCol = layout.preGhiChuCol >= 0 ? layout.preGhiChuCol : 12;
+  const cumAttrCol = layout.cumAttrCol;
+  const maCumChiTietCol = layout.maCumChiTietCol;
 
   for (let r = startRow - 1; r < rows.length; r++) {
     const row = rows[r] ?? [];
@@ -335,7 +420,18 @@ function parseParts(rows, srcSheet) {
 
     if (name == null || name === '') continue;
 
+    // The wood-parts table ends at its "Quy cách phôi" (N. Liệu) stock-cut
+    // row, immediately followed by "Tổng KL Tinh/Thô" totals, then steel
+    // parts and hardware/screws tables — none of which are wood components.
+    if (
+      normText(row[0]) === 'n. liệu' ||
+      normText(name).startsWith('tổng kl tinh')
+    ) {
+      break;
+    }
+
     const code = codeCol >= 0 ? fmtCode(row[codeCol]) : null;
+    const maCumChiTiet = maCumChiTietCol >= 0 ? fmtCode(row[maCumChiTietCol]) : null;
     const steps = [];
 
     // IMPORTANT:
@@ -343,7 +439,7 @@ function parseParts(rows, srcSheet) {
     // This reaches far columns like FC in sheet 3A (2).
     for (let cs = stepStartCol; cs < row.length; cs += STEP_WIDTH) {
       const sname = row[cs];
-      const stime = row[cs + 4];
+      const stime = row[cs + 3];
 
       if (
         sname &&
@@ -358,6 +454,7 @@ function parseParts(rows, srcSheet) {
     parts.push({
       loai: row[0] == null ? 'Cụm' : 'Chi Tiết',
       code,
+      maCumChiTiet,
       name,
 
       sl: row[2],
@@ -367,7 +464,9 @@ function parseParts(rows, srcSheet) {
       dai_tinh: row[8],
       khoi: row[10],
       dt_bm: row[11],
-      ghi_chu: row[13],
+      cum_attr: cumAttrCol >= 0 ? row[cumAttrCol] : null,
+      pre_ghi_chu: row[preGhiChuCol],
+      ghi_chu: row[ghiChuCol],
 
       steps
     });
@@ -399,6 +498,7 @@ function createWorkbook() {
       'Mã',
       'Mô Tả',
       'Loại',
+      'Loại chi tiết',
       'Số Lượng',
       'Dia/rộng hộp',
       'Dia/dài hộp',
@@ -447,24 +547,42 @@ function fillBom(ws, prod, parts) {
   setCell(ws, 2, 5, prod.cao);
 
   let wr = 7;
+  let khoiSum = 0;
+  let dtBmSum = 0;
 
   for (const p of parts) {
     if (p.code == null) continue;
 
     setCell(ws, wr, 1, p.name);
-    setCell(ws, wr, 2, p.code);
-    setCell(ws, wr, 3, p.ghi_chu);
+    setCell(ws, wr, 2, p.maCumChiTiet);
+    setCell(ws, wr, 3, moTa(p.pre_ghi_chu, p.ghi_chu));
     setCell(ws, wr, 4, p.loai);
-    setCell(ws, wr, 5, p.sl);
-    setCell(ws, wr, 6, p.rong_tho);
-    setCell(ws, wr, 7, p.dai_tho);
-    setCell(ws, wr, 8, p.dai_tinh);
-    setCell(ws, wr, 9, p.day_tho);
-    setCell(ws, wr, 12, p.khoi);
-    setCell(ws, wr, 13, p.dt_bm);
+    setCell(ws, wr, 5, p.cum_attr);
+    setCell(ws, wr, 6, p.sl);
+    setCell(ws, wr, 7, p.rong_tho);
+    setCell(ws, wr, 8, p.dai_tho);
+    setCell(ws, wr, 9, p.dai_tinh);
+    setCell(ws, wr, 10, p.day_tho);
+    setCell(ws, wr, 11, prod.loaiGo);
+    setCell(ws, wr, 13, p.khoi);
+    setCell(ws, wr, 14, p.dt_bm);
+
+    if (isFinite(Number(p.khoi))) khoiSum += Number(p.khoi);
+    if (isFinite(Number(p.dt_bm))) dtBmSum += Number(p.dt_bm);
 
     wr++;
   }
+
+  setCell(ws, 2, 6, khoiSum);
+  setCell(ws, 2, 7, dtBmSum);
+}
+
+function moTa(preGhiChu, ghiChu) {
+  const a = preGhiChu == null || preGhiChu === '' ? '' : String(preGhiChu).trim();
+  const b = ghiChu == null || ghiChu === '' ? '' : String(ghiChu).trim();
+
+  if (a === '' && b === '') return null;
+  return `${a}_${b}`;
 }
 
 function fillBomCongDoan(ws, prod, parts) {
