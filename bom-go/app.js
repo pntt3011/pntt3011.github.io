@@ -452,7 +452,6 @@ function parseParts(rows, srcSheet) {
     }
 
     parts.push({
-      loai: row[0] == null ? 'Cụm' : 'Chi Tiết',
       code,
       maCumChiTiet,
       name,
@@ -470,6 +469,14 @@ function parseParts(rows, srcSheet) {
 
       steps
     });
+  }
+
+  // A component is a "Cụm" only if some other row's "MÃ CỤM - CHI TIẾT" is a
+  // child of its own (e.g. "1" is the parent of "1.1", "1.2"...).
+  for (const p of parts) {
+    const prefix = p.maCumChiTiet != null ? `${p.maCumChiTiet}.` : null;
+    const hasChild = prefix != null && parts.some(other => other.maCumChiTiet?.startsWith(prefix));
+    p.loai = hasChild ? 'Cụm' : 'Chi Tiết';
   }
 
   return parts;
@@ -567,8 +574,13 @@ function fillBom(ws, prod, parts) {
     setCell(ws, wr, 13, p.khoi);
     setCell(ws, wr, 14, p.dt_bm);
 
-    if (isFinite(Number(p.khoi))) khoiSum += Number(p.khoi);
-    if (isFinite(Number(p.dt_bm))) dtBmSum += Number(p.dt_bm);
+    // Only first-order components ("1", "2", "3"…, not "1.1", "2.3"…)
+    // count toward the product totals — their sub-components are already
+    // part of them.
+    if (p.maCumChiTiet != null && !p.maCumChiTiet.includes('.')) {
+      if (isFinite(Number(p.khoi))) khoiSum += Number(p.khoi);
+      if (isFinite(Number(p.dt_bm))) dtBmSum += Number(p.dt_bm);
+    }
 
     wr++;
   }
@@ -600,9 +612,9 @@ function fillBomCongDoan(ws, prod, parts) {
 
     const sl = p.sl ?? 1;
 
-    setCell(ws, wr, 1, 'Chi tiết');
+    setCell(ws, wr, 1, p.loai === 'Cụm' ? 'Cụm' : 'Chi tiết');
     setCell(ws, wr, 2, p.name);
-    setCell(ws, wr, 3, p.code);
+    setCell(ws, wr, 3, p.maCumChiTiet);
 
     const validSteps = p.steps.filter(([sname]) => lookupStep(sname));
     const total = validSteps.length;
