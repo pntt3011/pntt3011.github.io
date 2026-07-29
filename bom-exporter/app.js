@@ -187,8 +187,23 @@ function parseProduct(rows) {
     code: valueRightOfLabel(rows, ['Item Code:', 'Item Code :']),
     dai,
     rong,
-    cao
+    cao,
+    loaiGo: findLoaiGo(rows)
   };
+}
+
+// Newer sheets carry "Loại gỗ" as a label/value pair stacked two rows apart
+// in the same column. Older sheets instead had the value to the right of a
+// same-row "Kind of wood :" label.
+function findLoaiGo(rows) {
+  const hit = findCell(rows, v => normText(v) === 'loại gỗ');
+
+  if (hit) {
+    const value = rows[hit.r + 2]?.[hit.c];
+    if (value != null && value !== '') return value;
+  }
+
+  return valueRightOfLabel(rows, ['Kind of wood :', 'Kind of wood:']);
 }
 
 function findDimensionValues(rows) {
@@ -250,6 +265,8 @@ function detectLayout(rows) {
     normText(row?.[1]).startsWith('cộng'), steelHeaderIdx + 1
   )?.r ?? rows.length;
 
+  const woodGhiChuCol = findColByHeader(woodHeader, ['ghi chú'], 13);
+
   return {
     wood: {
       dataStartRow: woodHeaderIdx >= 0 ? woodHeaderIdx + 2 : -1, // skip unit sub-header row
@@ -262,7 +279,11 @@ function detectLayout(rows) {
       daiTinhCol: findColByHeader(woodHeader, ['dài(mm)', 'dài (mm)'], 8),
       mongCol: findColByHeader(woodHeader, ['mộng(mm)', 'mộng (mm)'], 9),
       loaiChiTietCol: findColByHeader(woodHeader, ['loại chi tiết'], 20),
-      ghiChuCol: findColByHeader(woodHeader, ['ghi chú'], 13)
+      ghiChuCol: woodGhiChuCol,
+      // The column immediately left of "Ghi chú" carries an extra note (e.g.
+      // "Mặt Cào Cước") whose header text varies between workbooks, so it's
+      // located positionally rather than by name.
+      preGhiChuCol: woodGhiChuCol > 0 ? woodGhiChuCol - 1 : -1
     },
     steel: {
       dataStartRow: steelHeaderIdx >= 0 ? steelHeaderIdx + 1 : -1,
@@ -329,12 +350,23 @@ function parseWoodParts(rows) {
       daiTinh: row[L.daiTinhCol],
       mong: row[L.mongCol],
       loaiChiTiet: L.loaiChiTietCol >= 0 ? row[L.loaiChiTietCol] : null,
-      ghiChu: L.ghiChuCol >= 0 ? row[L.ghiChuCol] : null
+      ghiChu: joinNotes(
+        L.preGhiChuCol >= 0 ? row[L.preGhiChuCol] : null,
+        L.ghiChuCol >= 0 ? row[L.ghiChuCol] : null
+      )
     });
   }
 
   markLoai(parts);
   return parts;
+}
+
+function joinNotes(a, b) {
+  const notes = [a, b]
+    .map(v => (v == null || v === '' ? '' : String(v).trim()))
+    .filter(v => v !== '');
+
+  return notes.length ? notes.join(', ') : null;
 }
 
 // Sắt has no dedicated name/notes split — its Tên carries the parenthesized
@@ -535,6 +567,7 @@ function fillBom(ws, prod, parts, material) {
       setCell(ws, r, 8, p.dayTinh);
       setCell(ws, r, 9, p.daiTinh);
       setCell(ws, r, 10, p.mong);
+      setCell(ws, r, 11, prod.loaiGo);
     } else {
       setCell(ws, r, 7, p.diaRongHop);
       setCell(ws, r, 8, p.diaDaiHop);
