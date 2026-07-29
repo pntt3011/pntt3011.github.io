@@ -88,6 +88,44 @@ h2.section-title {
 .file-drop-zone.has-file .drop-label { color: var(--accent); }
 .file-drop-zone.has-file .drop-label svg { opacity: 1; }
 
+/* ── Material toggle ── */
+.material-toggle {
+  display: flex;
+  gap: 10px;
+}
+
+.material-option {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--card-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  transition: border-color .15s, background .15s, color .15s, opacity .15s;
+}
+
+.material-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+.material-option:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.material-option input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
 /* ── Action row ── */
 .action-row {
   display: flex;

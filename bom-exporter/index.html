@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BOM Go</title>
+  <title>BOM Exporter</title>
   <link rel="stylesheet" href="./styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
@@ -15,7 +15,7 @@
     <section class="card">
       <h2 class="section-title" style="display:flex;align-items:center;gap:8px;">
         <img src="../shared/logo.png" alt="Kingston" style="width:24px;height:24px;object-fit:contain;" />
-        BOM Go
+        BOM Exporter
       </h2>
 
       <!-- Step 1: Upload -->
@@ -48,9 +48,24 @@
         </label>
       </div>
 
-      <!-- Step 3: Parse -->
+      <!-- Step 3: Material selector -->
+      <div class="field-group">
+        <span>Vật liệu</span>
+        <div class="material-toggle">
+          <label class="material-option">
+            <input type="radio" name="material" id="materialGo" value="go" checked />
+            <span>Gỗ</span>
+          </label>
+          <label class="material-option">
+            <input type="radio" name="material" id="materialSat" value="sat" />
+            <span>Sắt</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Step 4: Parse -->
       <div class="action-row">
-        <button id="parseBtn" class="primary-button" disabled>Parse</button>
+        <button id="parseBtn" class="primary-button" disabled>Xuất Excel</button>
         <span id="statusMsg" class="status-msg"></span>
       </div>
     </section>
