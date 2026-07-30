@@ -28,11 +28,15 @@ function boot() {
 
 function cacheElements() {
     elements.appStatus = document.getElementById('appStatus');
+    elements.dropzone = document.getElementById('dropzone');
+    elements.fileInput = document.getElementById('fileInput');
     elements.resultsList = document.getElementById('resultsList');
     elements.exportButton = document.getElementById('exportButton');
+    elements.browseButton = elements.dropzone.querySelector('.browse-button');
     elements.resultsPanelTitle = document.getElementById('resultsPanelTitle');
     elements.productListSection = document.getElementById('productListSection');
     elements.productList = document.getElementById('productList');
+    elements.productCount = document.getElementById('productCount');
     elements.calculateButton = document.getElementById('calculateButton');
 }
 
@@ -51,8 +55,6 @@ async function init() {
         state.wasmReady = true;
         Render.setStatus(elements.appStatus, 'ready', 'Sẵn sàng');
         setExportEnabled(false);
-
-        await loadData();
     } catch (err) {
         Render.setStatus(elements.appStatus, 'error', 'Lỗi');
         throw err;
@@ -60,7 +62,44 @@ async function init() {
 }
 
 function bindEvents() {
+    elements.dropzone.addEventListener('click', event => {
+        if (event.target === elements.fileInput) return;
+        elements.fileInput.click();
+    });
+
+    elements.dropzone.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            elements.fileInput.click();
+        }
+    });
+
+    elements.browseButton.addEventListener('click', event => {
+        event.stopPropagation();
+        elements.fileInput.click();
+    });
+
     elements.exportButton.addEventListener('click', exportExcel);
+
+    elements.fileInput.addEventListener('change', () => {
+        if (elements.fileInput.files?.length) handleFiles(elements.fileInput.files);
+    });
+
+    elements.dropzone.addEventListener('dragover', event => {
+        event.preventDefault();
+        elements.dropzone.classList.add('is-dragover');
+    });
+
+    elements.dropzone.addEventListener('dragleave', () => {
+        elements.dropzone.classList.remove('is-dragover');
+    });
+
+    elements.dropzone.addEventListener('drop', event => {
+        event.preventDefault();
+        elements.dropzone.classList.remove('is-dragover');
+        const files = event.dataTransfer?.files;
+        if (files?.length) handleFiles(files);
+    });
 
     elements.calculateButton.addEventListener('click', () => {
         if (!state.parsedCache) return;
@@ -68,7 +107,15 @@ function bindEvents() {
     });
 }
 
-async function loadData() {
+async function handleFiles(fileList) {
+    const files = Array.from(fileList).filter(isExcelFile);
+
+    if (!files.length) {
+        Render.setStatus(elements.appStatus, 'error', 'File không hợp lệ');
+        Render.renderErrorState('Vui lòng chọn file Excel có phần mở rộng .xlsx, .xls hoặc .xlsm.');
+        return;
+    }
+
     state.parsedCache = null;
     state.validation = [];
     state.productConfigs = {};
@@ -77,18 +124,27 @@ async function loadData() {
     setExportEnabled(false);
 
     elements.productList.innerHTML = '';
+    elements.productCount.textContent = '';
     elements.productListSection.hidden = true;
     elements.calculateButton.disabled = true;
-    Render.renderEmptyState('Đang tải dữ liệu', 'Hệ thống đang gom dữ liệu BOM.');
+    Render.renderEmptyState('Đang đọc workbook', 'Hệ thống đang gom dữ liệu BOM.');
 
     try {
-        const response = await fetch('./data.json');
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const result = await response.json();
-        result.products = result.products.filter(p => p.components?.some(c => c.kind === 'steel'));
+        if (!window.XLSX) throw new Error('SheetJS XLSX is not available.');
 
-        state.parsedCache = result;
-        state.validation = result.validation ?? [];
+        const parsedResults = [];
+        for (let i = 0; i < files.length; i++) {
+            const buffer = await files[i].arrayBuffer();
+            const workbook = window.XLSX.read(buffer, { type: 'array', cellDates: false });
+            const result = window.BomParser.parseWorkbook(workbook, { includeValidation: true });
+            parsedResults.push({ result, fileIndex: i });
+        }
+
+        const merged = mergeResults(parsedResults);
+        merged.products = merged.products.filter(p => p.components?.some(c => c.kind === 'steel'));
+
+        state.parsedCache = merged;
+        state.validation = merged.validation ?? [];
 
         for (const product of state.parsedCache.products) {
             state.productConfigs[product.id] = { qty: product.qty ?? 0, enabled: false };
@@ -99,8 +155,34 @@ async function loadData() {
         console.error(error);
         Render.setStatus(elements.appStatus, 'error', 'Xử lý thất bại');
         setExportEnabled(false);
-        Render.renderErrorState('Không thể tải dữ liệu BOM.', error?.message || String(error));
+        Render.renderErrorState('Không thể phân tích file Excel.', error?.message || String(error));
     }
+}
+
+function mergeResults(parsedResults) {
+    const allProducts = [];
+    const allValidation = [];
+    const orderNames = [];
+
+    for (const { result, fileIndex } of parsedResults) {
+        const orderName = result.order_name ?? null;
+        if (orderName) orderNames.push(orderName);
+
+        for (const product of result.products) {
+            const id = orderName
+                ? `${orderName}::${product.sheetName}`
+                : `${fileIndex}::${product.sheetName}`;
+            allProducts.push({ ...product, id, order_name: orderName });
+        }
+
+        if (result.validation) allValidation.push(...result.validation);
+    }
+
+    return {
+        order_name: orderNames.join(', ') || null,
+        products: allProducts,
+        validation: allValidation,
+    };
 }
 
 function runCalculation() {
@@ -475,6 +557,11 @@ function applyWorkbookStyles(sheet, { titleRows, tableHeaderRows, mergeRanges, c
 function setExportEnabled(enabled) {
     if (!elements.exportButton) return;
     elements.exportButton.disabled = !enabled;
+}
+
+function isExcelFile(file) {
+    const name = String(file?.name || '').toLowerCase();
+    return name.endsWith('.xlsx') || name.endsWith('.xls') || name.endsWith('.xlsm');
 }
 
 if (document.readyState === 'loading') {

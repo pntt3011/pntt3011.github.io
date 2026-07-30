@@ -25,6 +25,7 @@ export function renderProducts(products, { onToggle, onQtyChange, onGroupToggle,
 
     el.productListSection.hidden = false;
     el.productList.innerHTML = '';
+    if (el.productCount) el.productCount.textContent = `${products.length} sản phẩm`;
 
     const groups = new Map();
     for (const product of products) {
