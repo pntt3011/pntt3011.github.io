@@ -191,6 +191,7 @@ function aggregateCuttingPlan(products, productConfigs, partMethods = {}) {
             box_width: item.box_width,
             box_length: item.box_length,
             type: isSteelTypeGroup(item.types) ? 'sắt' : item.types.values().next().value,
+            densityType: item.types.values().next().value,
             shape: item.shape,
             thickness: item.thickness,
             method: item.method,
@@ -238,9 +239,18 @@ function computeMaterialPlan(material) {
         max_pattern_waste: maxPatternWaste,
     };
 
+    const optInput = {
+        lengths,
+        quantities,
+        bundle_size: bundleSize,
+        max_pattern_waste: maxPatternWaste,
+        max_stock_length: STOCK_LENGTH,
+    };
+
     return {
         material,
         input,
+        optInput,
         displayStockLength: STOCK_LENGTH + STOCK_DISPLAY_OFFSET,
         result: null,
         error: lengths.length ? null : 'Không có chi tiết hợp lệ.',

@@ -192,6 +192,7 @@ function runCalculation() {
     const runId = state.optimizationId;
 
     state.viewModel = buildViewModel(state.parsedCache, state.productConfigs, state.partMethods);
+    state.viewModel.optimizedPlans = null;
 
     Render.renderProducts(state.viewModel.products, {
         onToggle: (id, enabled) => {
@@ -223,6 +224,32 @@ function runCalculation() {
         state.pendingPlans++;
         wasmWorker.postMessage({ type: 'computePlan', runId, index: i, input: plans[i].input });
     }
+    if (state.pendingPlans === 0) checkStartOptimization(runId);
+}
+
+const WASTE_ALERT_PCT = 1.0;
+const STOCK_DISPLAY_OFFSET = 50;
+
+function needsOptimization(plan) {
+    return !plan.error && plan.result?.percentage_wasted >= WASTE_ALERT_PCT;
+}
+
+function checkStartOptimization(runId) {
+    if (runId !== state.optimizationId) return;
+    const plans = state.viewModel?.plans;
+    if (!plans?.length) return;
+
+    const optimizedPlans = new Array(plans.length).fill(null);
+    state.viewModel.optimizedPlans = optimizedPlans;
+
+    for (let i = 0; i < plans.length; i++) {
+        if (needsOptimization(plans[i])) {
+            wasmWorker.postMessage({ type: 'computeOptimalPlan', runId, index: i, optInput: plans[i].optInput });
+        } else {
+            optimizedPlans[i] = plans[i];
+        }
+    }
+    Render.refreshCuttingSection(state.viewModel);
 }
 
 function handleWorkerMessage({ data }) {
@@ -236,6 +263,18 @@ function handleWorkerMessage({ data }) {
             error: data.error ?? state.viewModel.plans[index].error,
         };
         state.pendingPlans--;
+        Render.refreshCuttingSection(state.viewModel);
+        if (state.pendingPlans === 0) checkStartOptimization(runId);
+
+    } else if (type === 'optimalPlanResult') {
+        const basePlan = state.viewModel.plans[index];
+        const bestStockLength = data.optResult?.best_stock_length ?? basePlan.input.stock_length;
+        state.viewModel.optimizedPlans[index] = {
+            ...basePlan,
+            displayStockLength: bestStockLength + STOCK_DISPLAY_OFFSET,
+            result: data.optResult?.best_result ?? null,
+            error: data.error ?? null,
+        };
         Render.refreshCuttingSection(state.viewModel);
     }
 }
