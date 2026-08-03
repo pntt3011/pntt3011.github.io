@@ -417,6 +417,7 @@ body {
 .results-section-title {
   font-size: 0.94rem;
   font-weight: 600;
+  padding-left: 6px;
 }
 
 .collapsible-waste-badge-group {
