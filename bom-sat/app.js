@@ -325,6 +325,7 @@ function parseParts(rows) {
     for (let cs = L.stepStartCol; cs < row.length; cs += STEP_WIDTH) {
       const sname = row[cs];
       const stime = row[cs + 1];
+      const sbatch = row[cs + 2];
 
       if (!sname || typeof sname !== 'string') continue;
 
@@ -334,9 +335,9 @@ function parseParts(rows) {
       const isSynthetic = isXuLyStepName(sname) || isSonTinhDienStepName(sname);
 
       if (stime != null && stime !== '') {
-        steps.push([sname.trim(), stime]);
+        steps.push([sname.trim(), stime, sbatch]);
       } else if (isSynthetic) {
-        steps.push([sname.trim(), null]);
+        steps.push([sname.trim(), null, sbatch]);
       }
     }
 
@@ -670,8 +671,6 @@ function fillBomCongDoan(ws, prod, parts, usedSteps) {
   for (const p of parts) {
     if (p.code == null) continue;
 
-    const rowSl = p.sl ?? 1;
-
     setCell(ws, wr, 1, p.loai === 'Cụm' ? 'Cụm' : 'Chi tiết');
     setCell(ws, wr, 2, p.name);
     setCell(ws, wr, 3, p.code);
@@ -680,7 +679,7 @@ function fillBomCongDoan(ws, prod, parts, usedSteps) {
     const total = validSteps.length;
     const factor = danTranMatFactor(p.loaiChiTiet);
 
-    validSteps.forEach(([sname, stime], idx) => {
+    validSteps.forEach(([sname, stime, sbatch], idx) => {
       const order = idx + 1;
       const isLast = order === total ? 1 : 0;
       const col = lookupStep(sname);
@@ -696,7 +695,8 @@ function fillBomCongDoan(ws, prod, parts, usedSteps) {
       } else {
         t = Math.ceil(Number(stime));
         if (!isFinite(t)) t = 0;
-        sl = rowSl;
+        sl = Number(sbatch);
+        if (!isFinite(sl)) sl = 0;
       }
 
       setCell(ws, wr, col, `${t}-${sl}-${order}-${isLast}`);
