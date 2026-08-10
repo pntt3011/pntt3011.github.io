@@ -1,0 +1,105 @@
+@import url("../shared/design.css");
+
+body {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px 16px;
+}
+
+/* ── Shell ── */
+.app-shell {
+  width: min(480px, 100%);
+}
+
+/* Override card for this app's layout */
+.card {
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+h2.section-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.2px;
+}
+
+/* ── Fields ── */
+.field-group label {
+  display: grid;
+  gap: 7px;
+}
+
+.field-group label > span {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── File drop zone ── */
+.file-drop-zone {
+  position: relative;
+  border: 2px dashed var(--card-border);
+  border-radius: var(--radius-md);
+  background: #f8fafc;
+  transition: border-color .15s, background .15s;
+  cursor: pointer;
+}
+.file-drop-zone:hover,
+.file-drop-zone.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-muted);
+}
+.file-drop-zone.has-file {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.file-drop-zone input[type="file"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.drop-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 16px;
+  pointer-events: none;
+  color: var(--muted);
+  text-align: center;
+}
+.drop-label svg { opacity: 0.6; }
+.drop-label span { font-size: 0.88rem; font-weight: 500; }
+
+.file-drop-zone.has-file .drop-label { color: var(--accent); }
+.file-drop-zone.has-file .drop-label svg { opacity: 1; }
+
+/* ── Action row ── */
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* ── Status message ── */
+.status-msg {
+  font-size: 0.85rem;
+  color: var(--muted);
+  flex: 1;
+}
+.status-msg.success { color: #166534; }
+.status-msg.error   { color: var(--danger); }
