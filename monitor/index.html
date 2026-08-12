@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kingston Production Monitor</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; }
+  h1 { margin-top: 0; }
+  h2 { margin-top: 2.5rem; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #ddd; }
+  th { background: #f5f5f5; }
+  #status { color: #666; margin-bottom: 1rem; }
+  #error { color: #b00020; }
+  #raw-toggle { margin: 1rem 0 0.5rem; cursor: pointer; }
+  #raw-json { background: #f5f5f5; padding: 1rem; overflow: auto; max-height: 400px; white-space: pre-wrap; word-break: break-word; }
+
+  #chart-legend { display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; margin-bottom: 0.75rem; font-size: 0.85rem; }
+  #chart-legend .legend-item { display: flex; align-items: center; gap: 0.4rem; }
+  #chart-legend .legend-item.toggleable { cursor: pointer; user-select: none; border: none; background: none; font: inherit; padding: 0; }
+  #chart-legend .legend-item.toggleable.disabled { opacity: 0.4; }
+  #chart-legend .swatch { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+  #chart-container { overflow-x: auto; }
+  #chart-svg text { font-size: 11px; fill: #333; }
+  .bar-segment { stroke: #fff; stroke-width: 1; }
+  .capacity-line { stroke: #b00020; stroke-width: 2; stroke-dasharray: 6 4; fill: none; }
+  .capacity-label { fill: #b00020; font-weight: 600; }
+
+  #matrix-week-label { font-weight: 600; margin-bottom: 0.75rem; }
+  #matrix-container { overflow: auto; max-height: 70vh; }
+  #matrix-table { border-collapse: collapse; font-size: 0.8rem; table-layout: fixed; }
+  #matrix-table th, #matrix-table td { border: 1px solid #ddd; padding: 0; text-align: center; }
+  #matrix-table thead th { background: #f5f5f5; padding: 0.4rem 0.5rem; position: sticky; top: 0; z-index: 2; }
+  #matrix-table .row-group, #matrix-table .row-step { width: 180px; max-width: 180px; }
+  #matrix-table .row-group { text-align: left; background: #eef1f5; padding: 0.3rem 0.6rem; font-weight: 600; position: sticky; left: 0; z-index: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #matrix-table .row-step { text-align: left; padding: 0.3rem 0.6rem; position: sticky; left: 0; background: #fff; z-index: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .matrix-cell { width: 60px; height: 32px; cursor: pointer; }
+  .matrix-cell.status-ok { background: #4caf50; }
+  .matrix-cell.status-near { background: #e53935; }
+  .matrix-cell.status-over { background: #111; }
+  .matrix-cell.status-no-capacity { background: #ccc; }
+  .matrix-cell.empty { cursor: default; background: transparent; }
+
+  #cell-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  #cell-modal-backdrop[hidden] { display: none; }
+  #cell-modal { background: #fff; border-radius: 8px; padding: 1.25rem; max-width: 600px; width: 90%; max-height: 80vh; overflow: auto; }
+  #cell-modal h3 { margin-top: 0; }
+  #cell-modal-close { float: right; cursor: pointer; border: none; background: none; font-size: 1.2rem; line-height: 1; }
+  #cell-modal table { width: 100%; font-size: 0.85rem; }
+  #cell-modal-summary { color: #444; margin-bottom: 0.75rem; }
+</style>
+</head>
+<body>
+<h1>Production Tasks</h1>
+<div id="status">Loading...</div>
+<div id="error"></div>
+
+<h2>Weekly Required Hours by Group</h2>
+<div id="chart-legend"></div>
+<div id="chart-container"></div>
+
+<h2>Required vs. Capacity by Step</h2>
+<div id="matrix-week-label"></div>
+<div id="matrix-container"></div>
+
+<div id="cell-modal-backdrop" hidden>
+  <div id="cell-modal">
+    <button type="button" id="cell-modal-close">&times;</button>
+    <h3 id="cell-modal-title"></h3>
+    <div id="cell-modal-summary"></div>
+    <table>
+      <thead>
+        <tr>
+          <th>Order</th>
+          <th>Product</th>
+          <th>Part</th>
+          <th>Required qty (day)</th>
+          <th>Completed / Total</th>
+        </tr>
+      </thead>
+      <tbody id="cell-modal-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<h2 hidden>Task List</h2>
+<table id="tasks-table" hidden>
+  <thead>
+    <tr>
+      <th>LSD</th>
+      <th>LFD</th>
+      <th>Status</th>
+      <th>Item</th>
+      <th>Planned</th>
+      <th>Ready</th>
+    </tr>
+  </thead>
+  <tbody id="tasks-body"></tbody>
+</table>
+
+<details id="raw-toggle" hidden>
+  <summary>Raw response JSON</summary>
+  <pre id="raw-json"></pre>
+</details>
+
+<script src="script.js"></script>
+<script>
+const GROUP_COLORS = [
+  "#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f",
+  "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac", "#666666"
+];
+
+const disabledGroupIds = new Set();
+let lastWeeklyData = null;
+let selectedWeekKey = null;
+let allTasks = [];
+let cachedGroupData = null;
+
+function selectWeek(weekKey) {
+  selectedWeekKey = weekKey;
+  if (lastWeeklyData) renderChart(lastWeeklyData);
+  renderMatrixForSelectedWeek();
+}
+
+function renderMatrixForSelectedWeek() {
+  const label = document.getElementById("matrix-week-label");
+  if (!cachedGroupData || !selectedWeekKey) return;
+
+  const [y, m, d] = selectedWeekKey.split("-").map(Number);
+  const weekStart = new Date(y, m - 1, d);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+
+  const fmt = (dt) => dt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  label.textContent = `Week of ${fmt(weekStart)} - ${fmt(weekEnd)}`;
+
+  const matrix = Calc.buildStepDayMatrix(allTasks, cachedGroupData, weekStart);
+  renderMatrix(matrix);
+}
+
+function toggleGroup(groupId) {
+  if (disabledGroupIds.has(groupId)) {
+    disabledGroupIds.delete(groupId);
+  } else {
+    disabledGroupIds.add(groupId);
+  }
+  if (lastWeeklyData) renderChart(lastWeeklyData);
+}
+
+function renderChart(weeklyData) {
+  lastWeeklyData = weeklyData;
+  const { weeks, groupOrder, weeklyCapacityByGroup } = weeklyData;
+  const container = document.getElementById("chart-container");
+  const legend = document.getElementById("chart-legend");
+
+  const colorByGroup = {};
+  groupOrder.forEach((g, i) => (colorByGroup[g.groupId] = GROUP_COLORS[i % GROUP_COLORS.length]));
+
+  // A group must be toggleable whenever it contributes to the chart at all -
+  // either demand (hours in some week) or capacity - otherwise its capacity
+  // could never be switched off from the legend.
+  const groupIsRelevant = {};
+  groupOrder.forEach((g) => {
+    const hasData = weeks.some((w) => w.byGroup[g.groupId] > 0);
+    const hasCapacity = (weeklyCapacityByGroup[g.groupId] || 0) > 0;
+    groupIsRelevant[g.groupId] = hasData || hasCapacity;
+  });
+
+  const activeGroups = groupOrder.filter((g) => !disabledGroupIds.has(g.groupId));
+
+  legend.innerHTML = groupOrder
+    .filter((g) => groupIsRelevant[g.groupId])
+    .map((g) => {
+      const isDisabled = disabledGroupIds.has(g.groupId);
+      return `
+      <button type="button" class="legend-item toggleable${isDisabled ? " disabled" : ""}" data-group-id="${g.groupId}">
+        <span class="swatch" style="background:${colorByGroup[g.groupId]}"></span>
+        ${g.groupName}
+      </button>`;
+    })
+    .join("") + `
+      <span class="legend-item">
+        <span class="swatch" style="background:#b00020;border-radius:50%"></span>
+        Weekly capacity
+      </span>`;
+
+  legend.querySelectorAll(".legend-item.toggleable").forEach((el) => {
+    el.addEventListener("click", () => toggleGroup(el.dataset.groupId));
+  });
+
+  if (weeks.length === 0) {
+    container.textContent = "No upcoming tasks to chart.";
+    return;
+  }
+
+  // recompute per-week totals and capacity restricted to active (non-toggled-off) groups
+  const adjustedWeeks = weeks.map((week) => {
+    const total = activeGroups.reduce((sum, g) => sum + (week.byGroup[g.groupId] || 0), 0);
+    return { ...week, activeTotal: total };
+  });
+  const effectiveCapacity = activeGroups.reduce((sum, g) => sum + (weeklyCapacityByGroup[g.groupId] || 0), 0);
+
+  const maxTotal = Math.max(effectiveCapacity, ...adjustedWeeks.map((w) => w.activeTotal), 1);
+  const chartHeight = 320;
+  const barWidth = 70;
+  const barGap = 30;
+  const leftPad = 60;
+  const topPad = 20;
+  const bottomPad = 50;
+  const width = leftPad + weeks.length * (barWidth + barGap);
+  const height = chartHeight + topPad + bottomPad;
+
+  const scaleY = (value) => (value / maxTotal) * chartHeight;
+
+  let svg = `<svg id="chart-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
+
+  // y-axis gridlines
+  const gridSteps = 4;
+  for (let i = 0; i <= gridSteps; i++) {
+    const value = (maxTotal / gridSteps) * i;
+    const y = topPad + chartHeight - scaleY(value);
+    svg += `<line x1="${leftPad}" y1="${y}" x2="${width}" y2="${y}" stroke="#eee" />`;
+    svg += `<text x="${leftPad - 8}" y="${y + 4}" text-anchor="end">${Math.round(value)}</text>`;
+  }
+
+  // bars
+  adjustedWeeks.forEach((week, i) => {
+    const x = leftPad + i * (barWidth + barGap);
+    let yCursor = topPad + chartHeight;
+    const isSelected = selectedWeekKey === week.key;
+
+    if (isSelected) {
+      svg += `<rect x="${x - 6}" y="${topPad - 6}" width="${barWidth + 12}" height="${chartHeight + 12}" fill="none" stroke="#2f7de1" stroke-width="2" rx="4" />`;
+    }
+
+    activeGroups.forEach((g) => {
+      const value = week.byGroup[g.groupId];
+      if (!value) return;
+      const segHeight = scaleY(value);
+      yCursor -= segHeight;
+      svg += `<rect class="bar-segment" x="${x}" y="${yCursor}" width="${barWidth}" height="${segHeight}" fill="${colorByGroup[g.groupId]}"><title>${g.groupName}: ${value.toFixed(1)}h</title></rect>`;
+    });
+
+    // invisible full-height click target so clicking anywhere on the bar (or
+    // above it, in the empty space) selects that week for the matrix below
+    svg += `<rect class="week-click-target" data-week-key="${week.key}" x="${x}" y="${topPad}" width="${barWidth}" height="${chartHeight}" fill="transparent" style="cursor:pointer" />`;
+
+    const label = `${week.start.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+    svg += `<text x="${x + barWidth / 2}" y="${topPad + chartHeight + 18}" text-anchor="middle">${label}</text>`;
+    svg += `<text x="${x + barWidth / 2}" y="${topPad + chartHeight - scaleY(week.activeTotal) - 6}" text-anchor="middle">${week.activeTotal.toFixed(0)}h</text>`;
+  });
+
+  // capacity reference line
+  const capY = topPad + chartHeight - scaleY(effectiveCapacity);
+  svg += `<line class="capacity-line" x1="${leftPad}" y1="${capY}" x2="${width}" y2="${capY}" />`;
+  svg += `<text class="capacity-label" x="${width - 4}" y="${capY - 6}" text-anchor="end">Capacity: ${effectiveCapacity.toFixed(0)}h/wk</text>`;
+
+  svg += `</svg>`;
+  container.innerHTML = svg;
+
+  container.querySelectorAll(".week-click-target").forEach((el) => {
+    el.addEventListener("click", () => selectWeek(el.dataset.weekKey));
+  });
+}
+
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function renderMatrix(matrix) {
+  const container = document.getElementById("matrix-container");
+  const { days, rows } = matrix;
+
+  if (rows.length === 0) {
+    container.textContent = "No step data available.";
+    return;
+  }
+
+  let html = `<table id="matrix-table"><thead><tr><th class="row-group">Group / Step</th>`;
+  days.forEach((day, i) => {
+    html += `<th>${DAY_LABELS[i]}<br>${day.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</th>`;
+  });
+  html += `</tr></thead><tbody>`;
+
+  let currentGroup = null;
+  rows.forEach((row) => {
+    if (row.groupName !== currentGroup) {
+      currentGroup = row.groupName;
+      html += `<tr><td class="row-group" colspan="${days.length + 1}">${row.groupName}</td></tr>`;
+    }
+
+    html += `<tr><td class="row-step" title="${row.stepName}">${row.stepName}</td>`;
+    row.cells.forEach((cell, i) => {
+      const dateKey = formatDateKeyLocal(cell.date);
+      html += `<td class="matrix-cell status-${cell.status}" data-step-id="${row.stepId}" data-date-key="${dateKey}" title="${row.stepName}: ${cell.required.toFixed(1)}h / ${cell.capacity.toFixed(1)}h capacity"></td>`;
+    });
+    html += `</tr>`;
+  });
+
+  html += `</tbody></table>`;
+  container.innerHTML = html;
+
+  container.querySelectorAll(".matrix-cell").forEach((el) => {
+    el.addEventListener("click", () => {
+      const row = rows.find((r) => r.stepId === el.dataset.stepId);
+      const cell = row?.cells.find((c) => formatDateKeyLocal(c.date) === el.dataset.dateKey);
+      if (row && cell) openCellModal(row, cell);
+    });
+  });
+}
+
+function formatDateKeyLocal(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function openCellModal(row, cell) {
+  const backdrop = document.getElementById("cell-modal-backdrop");
+  const title = document.getElementById("cell-modal-title");
+  const summary = document.getElementById("cell-modal-summary");
+  const body = document.getElementById("cell-modal-body");
+
+  const dateLabel = cell.date.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+  title.textContent = `${row.stepName} — ${dateLabel}`;
+  summary.textContent = `Required: ${cell.required.toFixed(1)}h / Capacity: ${cell.capacity.toFixed(1)}h`;
+
+  if (cell.contributions.length === 0) {
+    body.innerHTML = `<tr><td colspan="5">No tasks contribute to this day.</td></tr>`;
+  } else {
+    body.innerHTML = cell.contributions
+      .map(
+        (c) => `
+        <tr>
+          <td>${c.orderName}</td>
+          <td>${c.productName}</td>
+          <td>${c.partName}</td>
+          <td>${c.requiredQty.toFixed(1)}</td>
+          <td>${c.completedQty} / ${c.totalQty}</td>
+        </tr>`
+      )
+      .join("");
+  }
+
+  backdrop.hidden = false;
+}
+
+document.getElementById("cell-modal-close").addEventListener("click", () => {
+  document.getElementById("cell-modal-backdrop").hidden = true;
+});
+document.getElementById("cell-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "cell-modal-backdrop") e.target.hidden = true;
+});
+
+async function render() {
+  const statusEl = document.getElementById("status");
+  const errorEl = document.getElementById("error");
+  const table = document.getElementById("tasks-table");
+  const tbody = document.getElementById("tasks-body");
+
+  try {
+    const [result, groupData] = await Promise.all([Api.getProductionTasks(), Api.getGroupData()]);
+    const tasks = result?.data || [];
+
+    console.log("Production tasks response:", result);
+    document.getElementById("raw-json").textContent = JSON.stringify(result, null, 2);
+
+    allTasks = tasks;
+    cachedGroupData = groupData;
+
+    const weeklyData = Calc.buildWeeklyGroupHours(tasks, groupData);
+    renderChart(weeklyData);
+
+    if (!selectedWeekKey && weeklyData.weeks.length > 0) {
+      selectedWeekKey = weeklyData.weeks[0].key;
+    }
+    renderMatrixForSelectedWeek();
+
+    tbody.innerHTML = "";
+    tasks.forEach((task) => {
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${(task.lsd ?? "").slice(0, 10)}</td>
+        <td>${(task.lfd ?? "").slice(0, 10)}</td>
+        <td>${task.status ?? ""}</td>
+        <td>${task.metadata ?? ""}</td>
+        <td>${task.quantityPlanned ?? ""}</td>
+        <td>${task.quantityReady ?? ""}</td>
+      `;
+      tbody.appendChild(row);
+    });
+
+    statusEl.textContent = `${tasks.length} task(s) loaded`;
+  } catch (err) {
+    console.error("Production tasks request failed:", err);
+    errorEl.textContent = err.message;
+    statusEl.textContent = "Failed to load";
+  }
+}
+
+render();
+</script>
+</body>
+</html>

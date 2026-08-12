@@ -1,0 +1,344 @@
+{
+  "1": {
+    "name": "Cắt phôi",
+    "steps": {
+      "1": {
+        "name": "Cắt laser",
+        "capacityHour": 15
+      },
+      "2": {
+        "name": "Rút tán",
+        "capacityHour": 10
+      },
+      "17": {
+        "name": "Xẻ rãnh",
+        "capacityHour": 8
+      },
+      "144": {
+        "name": "Rút-tán",
+        "capacityHour": 25
+      },
+      "170": {
+        "name": "Cắt-nhôm",
+        "capacityHour": 15
+      },
+      "171": {
+        "name": "Cắt-cơ",
+        "capacityHour": 5
+      },
+      "172": {
+        "name": "Xẻ-rãnh",
+        "capacityHour": 5
+      },
+      "173": {
+        "name": "Cắt-CNC",
+        "capacityHour": 10
+      },
+      "174": {
+        "name": "Cắt-Laser",
+        "capacityHour": 20
+      }
+    }
+  },
+  "6": {
+    "name": "Hàn thợ",
+    "steps": {
+      "14": {
+        "name": "Hàn Mig (Sắt)",
+        "capacityHour": 70
+      },
+      "119": {
+        "name": "Hàn Laser Sắt",
+        "capacityHour": 24
+      },
+      "140": {
+        "name": "Hàn-Tig(Nhôm)",
+        "capacityHour": 60
+      },
+      "141": {
+        "name": "Hàn-Mig(Sắt)",
+        "capacityHour": 120
+      },
+      "142": {
+        "name": "Hàn-Laser(Sắt)",
+        "capacityHour": 15
+      },
+      "143": {
+        "name": "Hàn-Laser(Nhôm)",
+        "capacityHour": 15
+      }
+    }
+  },
+  "7": {
+    "name": "Hàn robot",
+    "steps": {
+      "25": {
+        "name": "Hàn Robot (Sắt)",
+        "capacityHour": 10
+      },
+      "139": {
+        "name": "Hàn-Robot(Sắt)",
+        "capacityHour": 15
+      }
+    }
+  },
+  "8": {
+    "name": "Mài kiểm",
+    "steps": {
+      "4": {
+        "name": "Kiểm khung",
+        "capacityHour": 96
+      },
+      "15": {
+        "name": "Mài khung",
+        "capacityHour": 64
+      },
+      "136": {
+        "name": "Chà-rung",
+        "capacityHour": 5
+      },
+      "137": {
+        "name": "Kiểm-khung",
+        "capacityHour": 30
+      },
+      "138": {
+        "name": "Mài-khung",
+        "capacityHour": 10
+      }
+    }
+  },
+  "9": {
+    "name": "Xử lý",
+    "steps": {
+      "5": {
+        "name": "Xử lý Sắt",
+        "capacityHour": 8
+      },
+      "26": {
+        "name": "Xử lý Nhôm",
+        "capacityHour": 8
+      },
+      "135": {
+        "name": "Xử-lý(Sắt)",
+        "capacityHour": 5
+      },
+      "175": {
+        "name": "Xử-lý-Sắt",
+        "capacityHour": 8
+      },
+      "176": {
+        "name": "Xử-lý-Nhôm",
+        "capacityHour": 8
+      }
+    }
+  },
+  "10": {
+    "name": "Tĩnh điện",
+    "steps": {
+      "6": {
+        "name": "Sơn tĩnh điện",
+        "capacityHour": 80
+      },
+      "132": {
+        "name": "Rung-tĩnh-điện",
+        "capacityHour": 15
+      },
+      "133": {
+        "name": "Sơn-tĩnh-điện",
+        "capacityHour": 5
+      }
+    }
+  },
+  "11": {
+    "name": "Glaze",
+    "steps": {
+      "130": {
+        "name": "Sơn-glaze",
+        "capacityHour": 15
+      },
+      "131": {
+        "name": "Sơn-lót",
+        "capacityHour": 5
+      }
+    }
+  },
+  "12": {
+    "name": "Định hình",
+    "steps": {
+      "19": {
+        "name": "Khoan",
+        "capacityHour": 25
+      },
+      "21": {
+        "name": "Dập",
+        "capacityHour": 10
+      },
+      "23": {
+        "name": "Tum đầu ống",
+        "capacityHour": 5
+      },
+      "60": {
+        "name": "Uốn CNC",
+        "capacityHour": 8
+      },
+      "65": {
+        "name": "Uốn 3 trục",
+        "capacityHour": 8
+      },
+      "75": {
+        "name": "Cắt tay",
+        "capacityHour": 8
+      },
+      "79": {
+        "name": "Uốn 1 trục",
+        "capacityHour": 16
+      },
+      "84": {
+        "name": "Uốn thủ công",
+        "capacityHour": 8
+      },
+      "85": {
+        "name": "Uốn NC",
+        "capacityHour": 8
+      },
+      "117": {
+        "name": "Uốn 7 trục",
+        "capacityHour": 8
+      },
+      "127": {
+        "name": "Ép cong",
+        "capacityHour": 8
+      },
+      "154": {
+        "name": "Khoan-lỗ",
+        "capacityHour": 20
+      },
+      "155": {
+        "name": "Sửa-nguội",
+        "capacityHour": 5
+      },
+      "156": {
+        "name": "Cắt-tay",
+        "capacityHour": 10
+      },
+      "157": {
+        "name": "Ép-cong",
+        "capacityHour": 15
+      },
+      "158": {
+        "name": "Uốn-tay",
+        "capacityHour": 5
+      },
+      "159": {
+        "name": "Uốn-7trục",
+        "capacityHour": 5
+      },
+      "160": {
+        "name": "Uốn-3trục",
+        "capacityHour": 5
+      },
+      "161": {
+        "name": "Uốn-1trục",
+        "capacityHour": 10
+      },
+      "162": {
+        "name": "Uốn-NC",
+        "capacityHour": 5
+      },
+      "163": {
+        "name": "Uốn-CNC",
+        "capacityHour": 5
+      },
+      "164": {
+        "name": "Tum-đầu",
+        "capacityHour": 5
+      },
+      "165": {
+        "name": "Lã-lỗ",
+        "capacityHour": 5
+      },
+      "166": {
+        "name": "Đục-lỗ",
+        "capacityHour": 10
+      },
+      "167": {
+        "name": "Nhấn-cong",
+        "capacityHour": 5
+      },
+      "168": {
+        "name": "Chặt-ngàm",
+        "capacityHour": 5
+      },
+      "169": {
+        "name": "Duỗi-chặt",
+        "capacityHour": 10
+      }
+    }
+  },
+  "13": {
+    "name": "Pát",
+    "steps": {
+      "9": {
+        "name": "Cắt lazer Pát",
+        "capacityHour": 8
+      },
+      "10": {
+        "name": "Mài Pát",
+        "capacityHour": 8
+      },
+      "11": {
+        "name": "Dập Pát",
+        "capacityHour": 25
+      },
+      "27": {
+        "name": "Lã Pát",
+        "capacityHour": 5
+      },
+      "34": {
+        "name": "Đục lỗ Pát",
+        "capacityHour": 5
+      },
+      "35": {
+        "name": "Nhấn Pát",
+        "capacityHour": 5
+      },
+      "147": {
+        "name": "Taro-Pát",
+        "capacityHour": 5
+      },
+      "148": {
+        "name": "Lã-Pát",
+        "capacityHour": 5
+      },
+      "149": {
+        "name": "Vuốt-Pát",
+        "capacityHour": 5
+      },
+      "150": {
+        "name": "Nhấn-Pát",
+        "capacityHour": 5
+      },
+      "151": {
+        "name": "Dập-Pát",
+        "capacityHour": 5
+      },
+      "152": {
+        "name": "Mài-Pát",
+        "capacityHour": 10
+      },
+      "153": {
+        "name": "Cắt-Pát",
+        "capacityHour": 5
+      }
+    }
+  },
+  "14": {
+    "name": "Đan dây",
+    "steps": {
+      "63": {
+        "name": "Đan-dây",
+        "capacityHour": 750
+      }
+    }
+  }
+}
