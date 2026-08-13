@@ -1,6 +1,10 @@
 // viewmodel.js — aggregate model.js output into render-ready data
 
-const STOCK_LENGTH = 5950;
+const STOCK_LENGTH_BY_METHOD = {
+    LZ: 5950,
+    CNC: 6000,
+};
+const DEFAULT_STOCK_LENGTH = STOCK_LENGTH_BY_METHOD.LZ;
 const STOCK_DISPLAY_OFFSET = 50;
 const DEFAULT_MAX_PATTERN_WASTE = 600;
 const DEFAULT_METHOD = 'LZ';
@@ -230,11 +234,12 @@ function collectMaterialItems(material) {
 function computeMaterialPlan(material) {
     const { lengths, quantities, maxPatternWaste } = collectMaterialItems(material);
     const bundleSize = getBundleSize(material.method, material.shape, material.box_width, material.box_length);
+    const stockLength = STOCK_LENGTH_BY_METHOD[material.method] ?? DEFAULT_STOCK_LENGTH;
 
     const input = {
         lengths,
         quantities,
-        stock_length: STOCK_LENGTH,
+        stock_length: stockLength,
         bundle_size: bundleSize,
         max_pattern_waste: maxPatternWaste,
     };
@@ -244,14 +249,14 @@ function computeMaterialPlan(material) {
         quantities,
         bundle_size: bundleSize,
         max_pattern_waste: maxPatternWaste,
-        max_stock_length: STOCK_LENGTH,
+        max_stock_length: stockLength,
     };
 
     return {
         material,
         input,
         optInput,
-        displayStockLength: STOCK_LENGTH + STOCK_DISPLAY_OFFSET,
+        displayStockLength: stockLength + STOCK_DISPLAY_OFFSET,
         result: null,
         error: lengths.length ? null : 'Không có chi tiết hợp lệ.',
         sourceCount: material.usage.length,
