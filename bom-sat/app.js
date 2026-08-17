@@ -449,10 +449,10 @@ function computeKhoiValues(parts) {
 // "Xử-lý(Nhôm)" or "Sơn-tĩnh-điện") but leaves time/batch blank for the
 // parser to fill in.
 const XU_LY_DAN_TRAN_FACTOR = {
-  'trần nhôm': { xuLy: 10.6, sonTinhDien: 15 },
-  'đan nhôm': { xuLy: 10.6, sonTinhDien: 12.5 },
-  'trần sắt': { xuLy: 5.4, sonTinhDien: 4.91 },
-  'đan sắt': { xuLy: 5.4, sonTinhDien: 4.1 }
+  'trần nhôm': { xuLy: 14.75, sonTinhDien: 14.75 },
+  'đan nhôm': { xuLy: 14.75, sonTinhDien: 14.75 },
+  'trần sắt': { xuLy: 5.04, sonTinhDien: 5.04 },
+  'đan sắt': { xuLy: 5.04, sonTinhDien: 5.04 }
 };
 
 function danTranMatFactor(loaiChiTiet) {
