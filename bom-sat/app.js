@@ -480,12 +480,14 @@ const CAT_PERIMETER_FACTOR = {
   'cắt cơ': { perimeter: 0.913, base: 28.72 }
 };
 
-// Cắt laser / Cắt lazer Pát / Ép cong: flat average time, no part inputs.
+// Cắt lazer Pát / Ép cong: flat average time, no part inputs.
 const CAT_FLAT_FACTOR = {
-  'cắt laser': 34.58,
   'cắt lazer pát': 22.69,
   'ép cong': 6.1
 };
+
+// Cắt laser: linear in Dài chi tiết (mm).
+const CAT_LASER_FACTOR = { daiChiTiet: 0.0219, base: 11.12 };
 
 // Uốn (all variants): linear in Rộng*Dày² + Dài chi tiết.
 const UON_FACTOR = { rongDay2: 4.45, daiChiTiet: 0.037, base: 91 };
@@ -536,6 +538,10 @@ function catFlatFactor(sname) {
   return CAT_FLAT_FACTOR[normText(sname)] ?? null;
 }
 
+function isCatLaserStepName(sname) {
+  return normText(sname) === 'cắt laser';
+}
+
 function isUonStepName(sname) {
   return normText(sname).startsWith('uốn');
 }
@@ -543,6 +549,7 @@ function isUonStepName(sname) {
 function isSyntheticStepName(sname) {
   return isXuLyStepName(sname) || isSonTinhDienStepName(sname) ||
     isKiemKhungStepName(sname) || isHanSatStepName(sname) || isUonStepName(sname) ||
+    isCatLaserStepName(sname) ||
     catPerimeterFactor(sname) != null || catFlatFactor(sname) != null;
 }
 
@@ -724,6 +731,11 @@ function syntheticStepTime(sname, p, khoiValue, dtBmValue) {
 
   const flat = catFlatFactor(sname);
   if (flat != null) return [Math.ceil(flat), 1];
+
+  if (isCatLaserStepName(sname)) {
+    const daiChiTiet = Number(p.daiChiTiet) || 0;
+    return [Math.ceil(daiChiTiet * CAT_LASER_FACTOR.daiChiTiet + CAT_LASER_FACTOR.base), 1];
+  }
 
   const perim = catPerimeterFactor(sname);
   if (perim) {
