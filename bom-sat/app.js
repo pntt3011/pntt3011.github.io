@@ -329,10 +329,11 @@ function parseParts(rows) {
 
       if (!sname || typeof sname !== 'string') continue;
 
-      // Xử-lý / Sơn-tĩnh-điện steps are named in the sheet but left with a
-      // blank time/batch — those get computed later from Loại chi tiết and
-      // the part's weight, so they're kept here instead of being dropped.
-      const isSynthetic = isXuLyStepName(sname) || isSonTinhDienStepName(sname);
+      // Synthetic steps (Xử-lý, Sơn-tĩnh-điện, Kiểm khung, Hàn Sắt, Cắt, Ép,
+      // Uốn) are named in the sheet but left with a blank time/batch — those
+      // get computed later from the part's geometry, so they're kept here
+      // instead of being dropped.
+      const isSynthetic = isSyntheticStepName(sname);
 
       if (stime != null && stime !== '') {
         steps.push([sname.trim(), stime, sbatch]);
@@ -422,10 +423,12 @@ function computeKhoiValues(parts) {
   }
 
   const khoiValue = new Map();
+  const dtBmValue = new Map();
 
   for (const p of included) {
     if (p.loai === 'Cụm') continue;
     khoiValue.set(p, steelKhoiLuong(p));
+    dtBmValue.set(p, steelDienTich(p));
   }
 
   const cumRows = included
@@ -436,24 +439,56 @@ function computeKhoiValues(parts) {
     const children = directChildren.get(p) ?? [];
     const cumSl = Number(p.sl) || 1;
     khoiValue.set(p, children.reduce((sum, c) => sum + khoiValue.get(c) * ((Number(c.sl) || 0) / cumSl), 0));
+    dtBmValue.set(p, children.reduce((sum, c) => sum + dtBmValue.get(c) * ((Number(c.sl) || 0) / cumSl), 0));
   }
 
-  return { khoiValue, directChildren };
+  return { khoiValue, dtBmValue, directChildren };
 }
 
-// ── Xử-lý / Sơn-tĩnh-điện synthetic steps ───────────────────────────────────
+// ── Synthetic công đoạn steps ────────────────────────────────────────────────
+// A handful of công đoạn have a regression formula (against the part's own
+// per-unit Khối lượng / Diện tích bề mặt / cut perimeter) instead of a fixed
+// time in the source sheet. The source sheet names the step but leaves
+// time/batch blank for these; the parser keeps them (see isSyntheticStepName)
+// and fillBomCongDoan computes the time from WORKSTEP_FACTOR below.
+// Batch size is fixed at 1 for all of them.
+
 // "Loại chi tiết" values like "Cụm đan Sắt" / "Trần nhôm" mark a part as
 // needing surface treatment: Xử-lý (material-only factor) and Sơn-tĩnh-điện
-// (material × đan/trần factor), both against the part's own per-unit weight,
-// batch size fixed at 1. The source sheet names the step ("Xử-lý(Sắt)",
-// "Xử-lý(Nhôm)" or "Sơn-tĩnh-điện") but leaves time/batch blank for the
-// parser to fill in.
-const XU_LY_DAN_TRAN_FACTOR = {
+// (material × đan/trần factor).
+const WORKSTEP_FACTOR = {
   'trần nhôm': { xuLy: 10.53, sonTinhDien: 14.75 },
   'đan nhôm': { xuLy: 10.53, sonTinhDien: 14.75 },
   'trần sắt': { xuLy: 5.4, sonTinhDien: 5.04 },
   'đan sắt': { xuLy: 5.4, sonTinhDien: 5.04 }
 };
+
+// Kiểm khung: linear in Khối lượng, factor picked by material only (đan/trần
+// doesn't matter here).
+const KIEM_KHUNG_FACTOR = {
+  'sắt': { weight: 64.78, base: 113.59 },
+  'nhôm': { weight: 63.59, base: 77.70 }
+};
+
+// Hàn Mig (Sắt) / Hàn Laser Sắt: linear in Khối lượng + Diện tích bề mặt.
+// Hàn Robot (Sắt) is intentionally excluded — stays manual.
+const HAN_SAT_FACTOR = { weight: 44.10, area: 60.39, base: 74.72 };
+
+// Cắt CNC / Cắt cơ: linear in cut perimeter (mm).
+const CAT_PERIMETER_FACTOR = {
+  'cắt cnc': { perimeter: 0.030, base: 8.97 },
+  'cắt cơ': { perimeter: 0.913, base: 28.72 }
+};
+
+// Cắt laser / Cắt lazer Pát / Ép cong: flat average time, no part inputs.
+const CAT_FLAT_FACTOR = {
+  'cắt laser': 34.58,
+  'cắt lazer pát': 22.69,
+  'ép cong': 6.1
+};
+
+// Uốn (all variants): linear in Rộng*Dày² + Dài chi tiết.
+const UON_FACTOR = { rongDay2: 4.45, daiChiTiet: 0.037, base: 91 };
 
 function danTranMatFactor(loaiChiTiet) {
   const t = normText(loaiChiTiet);
@@ -466,7 +501,14 @@ function danTranMatFactor(loaiChiTiet) {
   if (!sat && !nhom) return null;
 
   const key = `${dan ? 'đan' : 'trần'} ${sat ? 'sắt' : 'nhôm'}`;
-  return { ...XU_LY_DAN_TRAN_FACTOR[key], material: sat ? 'Sắt' : 'Nhôm' };
+  return { ...WORKSTEP_FACTOR[key], material: sat ? 'Sắt' : 'Nhôm' };
+}
+
+function materialOf(loaiChiTiet) {
+  const t = normText(loaiChiTiet);
+  if (t.includes('sắt')) return 'sắt';
+  if (t.includes('nhôm')) return 'nhôm';
+  return null;
 }
 
 function isXuLyStepName(sname) {
@@ -475,6 +517,45 @@ function isXuLyStepName(sname) {
 
 function isSonTinhDienStepName(sname) {
   return normText(sname) === 'sơn-tĩnh-điện' || normText(sname) === 'sơn tĩnh điện';
+}
+
+function isKiemKhungStepName(sname) {
+  return normText(sname) === 'kiểm khung';
+}
+
+function isHanSatStepName(sname) {
+  const t = normText(sname);
+  return t === 'hàn mig (sắt)' || t === 'hàn laser sắt';
+}
+
+function catPerimeterFactor(sname) {
+  return CAT_PERIMETER_FACTOR[normText(sname)] ?? null;
+}
+
+function catFlatFactor(sname) {
+  return CAT_FLAT_FACTOR[normText(sname)] ?? null;
+}
+
+function isUonStepName(sname) {
+  return normText(sname).startsWith('uốn');
+}
+
+function isSyntheticStepName(sname) {
+  return isXuLyStepName(sname) || isSonTinhDienStepName(sname) ||
+    isKiemKhungStepName(sname) || isHanSatStepName(sname) || isUonStepName(sname) ||
+    catPerimeterFactor(sname) != null || catFlatFactor(sname) != null;
+}
+
+// Cut perimeter (mm) for Cắt CNC / Cắt cơ: 2*(Rộng+Dài) for box-like profiles,
+// π*Rộng for round ones (Ống/Tròn đặc). Mirrors steelDienTich's D/E inputs
+// but stays in mm (no /1e6, no length multiplier).
+function steelCatPerimeter(p) {
+  const D = Number(p.diaRongHop) || 0;
+  const E = Number(p.diaDaiHop) || 0;
+  const loai = normText(p.loaiPhoi);
+
+  if (loai === 'ống' || loai === 'tròn đặc') return 3.14 * D;
+  return 2 * (D + E);
 }
 
 // ── Workbook factory ────────────────────────────────────────────────────────
@@ -545,45 +626,7 @@ function fillBom(ws, prod, parts) {
   let wr = 7;
   for (const p of included) rowOf.set(p, wr++);
 
-  // Leaf ("Chi Tiết") rows: per-unit mass/area straight from geometry.
-  // "Cụm" rows have no geometry of their own — their per-unit mass is the
-  // sum of their direct children's (per-unit mass × child SL).
-  const directChildren = new Map();
-  for (const p of included) {
-    if (p.loai !== 'Cụm') continue;
-    const prefix = `${p.code}.`;
-    const children = included.filter(o => {
-      if (!o.code?.startsWith(prefix)) return false;
-      const rest = o.code.slice(prefix.length);
-      return !rest.includes('.'); // direct child only, not grandchild
-    });
-    directChildren.set(p, children);
-  }
-
-  const khoiValue = new Map();
-  const dtBmValue = new Map();
-
-  for (const p of included) {
-    if (p.loai === 'Cụm') continue;
-    khoiValue.set(p, steelKhoiLuong(p));
-    dtBmValue.set(p, steelDienTich(p));
-  }
-
-  // A child's own SL is already the total count across the whole product, so
-  // a Cụm's per-instance mass divides the child's SL back down by the Cụm's
-  // own SL to get the per-single-assembly child count. Process deepest Cụm
-  // rows first so a Cụm-of-Cụm already has its children's aggregated values
-  // ready before its own parent needs them.
-  const cumRows = included
-    .filter(p => p.loai === 'Cụm')
-    .sort((a, b) => b.code.split('.').length - a.code.split('.').length);
-
-  for (const p of cumRows) {
-    const children = directChildren.get(p) ?? [];
-    const cumSl = Number(p.sl) || 1;
-    khoiValue.set(p, children.reduce((sum, c) => sum + khoiValue.get(c) * ((Number(c.sl) || 0) / cumSl), 0));
-    dtBmValue.set(p, children.reduce((sum, c) => sum + dtBmValue.get(c) * ((Number(c.sl) || 0) / cumSl), 0));
-  }
+  const { khoiValue, dtBmValue, directChildren } = computeKhoiValues(parts);
 
   for (const p of included) {
     const r = rowOf.get(p);
@@ -652,10 +695,57 @@ function fillBom(ws, prod, parts) {
   }
 }
 
+// Computes the (time, batch) pair for a synthetic step (blank time/batch in
+// the source sheet) from the part's own geometry. Returns null if sname
+// isn't one of the recognized synthetic steps or its required input (e.g.
+// Loại chi tiết material) can't be determined — callers fall back to the
+// sheet's own time/batch in that case.
+function syntheticStepTime(sname, p, khoiValue, dtBmValue) {
+  const weight = khoiValue.get(p) ?? 0;
+  const area = dtBmValue.get(p) ?? 0;
+
+  if (isXuLyStepName(sname) || isSonTinhDienStepName(sname)) {
+    const factor = danTranMatFactor(p.loaiChiTiet);
+    if (!factor) return null;
+    const f = isXuLyStepName(sname) ? factor.xuLy : factor.sonTinhDien;
+    return [Math.ceil(weight * f), 1];
+  }
+
+  if (isKiemKhungStepName(sname)) {
+    const mat = materialOf(p.loaiChiTiet);
+    if (!mat) return null;
+    const f = KIEM_KHUNG_FACTOR[mat];
+    return [Math.ceil(weight * f.weight + f.base), 1];
+  }
+
+  if (isHanSatStepName(sname)) {
+    return [Math.ceil(weight * HAN_SAT_FACTOR.weight + area * HAN_SAT_FACTOR.area + HAN_SAT_FACTOR.base), 1];
+  }
+
+  const flat = catFlatFactor(sname);
+  if (flat != null) return [Math.ceil(flat), 1];
+
+  const perim = catPerimeterFactor(sname);
+  if (perim) {
+    const perimeter = steelCatPerimeter(p);
+    return [Math.ceil(perimeter * perim.perimeter + perim.base), 1];
+  }
+
+  if (isUonStepName(sname)) {
+    const rong = Number(p.diaRongHop) || 0;
+    const day = Number(p.dayPhoi) || 0;
+    const daiChiTiet = Number(p.daiChiTiet) || 0;
+    const t = UON_FACTOR.base + UON_FACTOR.rongDay2 * (rong * day * day) + UON_FACTOR.daiChiTiet * daiChiTiet;
+    return [Math.ceil(t), 1];
+  }
+
+  return null;
+}
+
 function fillBomCongDoan(ws, prod, parts, usedSteps) {
   setCell(ws, 5, 2, prod.name);
 
-  const { khoiValue } = computeKhoiValues(parts);
+  const { khoiValue, dtBmValue } = computeKhoiValues(parts);
   const stepCol = Object.fromEntries(
     usedSteps.map((name, i) => [normalizeStepName(name), i + 5])
   );
@@ -677,7 +767,6 @@ function fillBomCongDoan(ws, prod, parts, usedSteps) {
 
     const validSteps = p.steps.filter(([sname]) => lookupStep(sname));
     const total = validSteps.length;
-    const factor = danTranMatFactor(p.loaiChiTiet);
 
     validSteps.forEach(([sname, stime, sbatch], idx) => {
       const order = idx + 1;
@@ -686,12 +775,10 @@ function fillBomCongDoan(ws, prod, parts, usedSteps) {
       if (!col) return;
 
       let t, sl;
+      const synthetic = stime == null ? syntheticStepTime(sname, p, khoiValue, dtBmValue) : null;
 
-      if (stime == null && factor) {
-        const weight = khoiValue.get(p) ?? 0;
-        const f = isXuLyStepName(sname) ? factor.xuLy : factor.sonTinhDien;
-        t = Math.ceil(weight * f);
-        sl = 1;
+      if (synthetic) {
+        [t, sl] = synthetic;
       } else {
         t = Math.ceil(Number(stime));
         if (!isFinite(t)) t = 0;

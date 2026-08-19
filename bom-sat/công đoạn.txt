@@ -1,0 +1,43 @@
+Đan dây
+Sơn glaze
+Sơn lót
+Sơn tĩnh điện
+Xử lý Nhôm
+Xử lý Sắt
+Chà rung
+Kiểm khung
+Mài khung
+Hàn Robot (Sắt)
+Hàn Tig (Nhôm)
+Hàn Mig (Sắt)
+Hàn Laser Sắt
+Hàn Laser Nhôm
+Rút tán
+Taro Pát
+Lã Pát
+Vuốt Pát
+Nhấn Pát
+Dập Pát
+Mài Pát
+Cắt lazer Pát
+Khoan
+Sửa nguội
+Cắt tay
+Ép cong
+Uốn thủ công
+Uốn 7 trục
+Uốn 3 trục
+Uốn 1 trục
+Uốn NC
+Uốn CNC
+Tum đầu ống
+Lã lỗ
+Đục lỗ
+Nhấn
+Chặt ngàm
+Duỗi Chặt
+Cắt nhôm
+Cắt cơ
+Xẻ rãnh
+Cắt CNC
+Cắt laser
