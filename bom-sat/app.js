@@ -791,6 +791,7 @@ function fillBomCongDoan(ws, prod, parts, usedSteps) {
 
       if (synthetic) {
         [t, sl] = synthetic;
+        t = Math.max(1, t);
       } else {
         t = Math.ceil(Number(stime));
         if (!isFinite(t)) t = 0;
