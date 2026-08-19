@@ -474,10 +474,11 @@ const KIEM_KHUNG_FACTOR = {
 // Hàn Robot (Sắt) is intentionally excluded — stays manual.
 const HAN_SAT_FACTOR = { weight: 44.10, area: 60.39, base: 74.72 };
 
-// Cắt CNC / Cắt cơ: linear in cut perimeter (mm).
-const CAT_PERIMETER_FACTOR = {
-  'cắt cnc': { perimeter: 0.030, base: 8.97 },
-  'cắt cơ': { perimeter: 0.913, base: 28.72 }
+// Cắt CNC / Cắt cơ: linear in cut area (mm²): Rộng×Dài for box-like
+// profiles, π*(Rộng/2)² for round ones (Ống/Tròn đặc).
+const CAT_AREA_FACTOR = {
+  'cắt cnc': { area: 0.0516, base: -9.23 },
+  'cắt cơ': { area: 0.0335, base: 5.40 }
 };
 
 // Cắt lazer Pát / Ép cong: flat average time, no part inputs.
@@ -530,8 +531,8 @@ function isHanSatStepName(sname) {
   return t === 'hàn mig (sắt)' || t === 'hàn laser sắt';
 }
 
-function catPerimeterFactor(sname) {
-  return CAT_PERIMETER_FACTOR[normText(sname)] ?? null;
+function catAreaFactor(sname) {
+  return CAT_AREA_FACTOR[normText(sname)] ?? null;
 }
 
 function catFlatFactor(sname) {
@@ -550,19 +551,18 @@ function isSyntheticStepName(sname) {
   return isXuLyStepName(sname) || isSonTinhDienStepName(sname) ||
     isKiemKhungStepName(sname) || isHanSatStepName(sname) || isUonStepName(sname) ||
     isCatLaserStepName(sname) ||
-    catPerimeterFactor(sname) != null || catFlatFactor(sname) != null;
+    catAreaFactor(sname) != null || catFlatFactor(sname) != null;
 }
 
-// Cut perimeter (mm) for Cắt CNC / Cắt cơ: 2*(Rộng+Dài) for box-like profiles,
-// π*Rộng for round ones (Ống/Tròn đặc). Mirrors steelDienTich's D/E inputs
-// but stays in mm (no /1e6, no length multiplier).
-function steelCatPerimeter(p) {
+// Cross-section area (mm²) for Cắt CNC / Cắt cơ: Rộng×Dài for box-like
+// profiles, π*(Rộng/2)² for round ones (Ống/Tròn đặc).
+function steelCatArea(p) {
   const D = Number(p.diaRongHop) || 0;
   const E = Number(p.diaDaiHop) || 0;
   const loai = normText(p.loaiPhoi);
 
-  if (loai === 'ống' || loai === 'tròn đặc') return 3.14 * D;
-  return 2 * (D + E);
+  if (loai === 'ống' || loai === 'tròn đặc') return 3.14 * (D / 2) ** 2;
+  return D * E;
 }
 
 // ── Workbook factory ────────────────────────────────────────────────────────
@@ -737,10 +737,10 @@ function syntheticStepTime(sname, p, khoiValue, dtBmValue) {
     return [Math.ceil(daiChiTiet * CAT_LASER_FACTOR.daiChiTiet + CAT_LASER_FACTOR.base), 1];
   }
 
-  const perim = catPerimeterFactor(sname);
-  if (perim) {
-    const perimeter = steelCatPerimeter(p);
-    return [Math.ceil(perimeter * perim.perimeter + perim.base), 1];
+  const areaFactor = catAreaFactor(sname);
+  if (areaFactor) {
+    const catArea = steelCatArea(p);
+    return [Math.ceil(catArea * areaFactor.area + areaFactor.base), 1];
   }
 
   if (isUonStepName(sname)) {
