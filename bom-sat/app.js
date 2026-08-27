@@ -329,16 +329,25 @@ function parseParts(rows) {
 
       if (!sname || typeof sname !== 'string') continue;
 
-      // Synthetic steps (Xử-lý, Sơn-tĩnh-điện, Kiểm khung, Hàn Sắt, Cắt, Ép,
-      // Uốn) are named in the sheet but left with a blank time/batch — those
-      // get computed later from the part's geometry, so they're kept here
-      // instead of being dropped.
+      // Synthetic steps (Xử-lý, Sơn-tĩnh-điện, Kiểm khung, Mài khung, Hàn Sắt,
+      // Cắt, Ép, Uốn) are named in the sheet but left with a blank time/batch
+      // — those get computed later from the part's geometry, so they're kept
+      // here instead of being dropped. Any other named step must carry both a
+      // time and a batch size; a blank is a data error, not something to
+      // silently skip.
       const isSynthetic = isSyntheticStepName(sname);
+      const hasTime = stime != null && stime !== '';
+      const hasBatch = sbatch != null && sbatch !== '';
 
-      if (stime != null && stime !== '') {
-        steps.push([sname.trim(), stime, sbatch]);
-      } else if (isSynthetic) {
+      if (isSynthetic && !hasTime) {
         steps.push([sname.trim(), null, sbatch]);
+      } else if (!hasTime || !hasBatch) {
+        throw new Error(
+          `Part "${name}" (row ${r + 1}): step "${sname.trim()}" is missing its ` +
+          `${!hasTime ? 'time' : 'batch size'}.`
+        );
+      } else {
+        steps.push([sname.trim(), stime, sbatch]);
       }
     }
 
