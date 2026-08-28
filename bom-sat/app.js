@@ -744,7 +744,7 @@ function syntheticStepTime(sname, p, khoiValue, dtBmValue) {
   }
 
   if (isKiemKhungStepName(sname)) {
-    const mat = materialOf(p.loaiChiTiet);
+    const mat = materialOf(p.loaiKhung);
     if (!mat) return null;
     const f = KIEM_KHUNG_FACTOR[mat];
     return [Math.ceil(weight * f.weight + f.base), 1];
