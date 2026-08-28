@@ -511,7 +511,7 @@ const UON_FACTOR = { rongDay2: 4.45, daiChiTiet: 0.037, base: 91 };
 function danTranMatFactor(loaiChiTiet) {
   const t = normText(loaiChiTiet);
   const dan = t.includes('đan');
-  const tran = t.includes('trần');
+  const tran = t.includes('trần') || t.includes('glaze');
   if (!dan && !tran) return null;
 
   const sat = t.includes('sắt');
