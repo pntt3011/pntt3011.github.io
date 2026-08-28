@@ -483,6 +483,9 @@ const KIEM_KHUNG_FACTOR = {
 // Hàn Robot (Sắt) is intentionally excluded — stays manual.
 const HAN_SAT_FACTOR = { weight: 44.10, area: 60.39, base: 74.72 };
 
+// Hàn Tig (Nhôm) / Hàn Laser Nhôm: linear in Khối lượng only.
+const HAN_NHOM_FACTOR = { weight: 216.60, base: 143.66 };
+
 // Mài khung: linear in Khối lượng, no material split.
 const MAI_KHUNG_FACTOR = { weight: 14.91, base: 25.31 };
 
@@ -547,6 +550,11 @@ function isHanSatStepName(sname) {
   return t === 'hàn mig (sắt)' || t === 'hàn laser sắt';
 }
 
+function isHanNhomStepName(sname) {
+  const t = normText(sname);
+  return t === 'hàn tig (nhôm)' || t === 'hàn laser nhôm';
+}
+
 function catAreaFactor(sname) {
   return CAT_AREA_FACTOR[normText(sname)] ?? null;
 }
@@ -566,7 +574,7 @@ function isUonStepName(sname) {
 function isSyntheticStepName(sname) {
   return isXuLyStepName(sname) || isSonTinhDienStepName(sname) ||
     isKiemKhungStepName(sname) || isMaiKhungStepName(sname) ||
-    isHanSatStepName(sname) || isUonStepName(sname) ||
+    isHanSatStepName(sname) || isHanNhomStepName(sname) || isUonStepName(sname) ||
     isCatLaserStepName(sname) ||
     catAreaFactor(sname) != null || catFlatFactor(sname) != null;
 }
@@ -744,6 +752,10 @@ function syntheticStepTime(sname, p, khoiValue, dtBmValue) {
 
   if (isHanSatStepName(sname)) {
     return [Math.ceil(weight * HAN_SAT_FACTOR.weight + area * HAN_SAT_FACTOR.area + HAN_SAT_FACTOR.base), 1];
+  }
+
+  if (isHanNhomStepName(sname)) {
+    return [Math.ceil(weight * HAN_NHOM_FACTOR.weight + HAN_NHOM_FACTOR.base), 1];
   }
 
   if (isMaiKhungStepName(sname)) {
