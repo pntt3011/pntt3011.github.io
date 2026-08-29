@@ -329,6 +329,12 @@ function parseParts(rows) {
 
       if (!sname || typeof sname !== 'string') continue;
 
+      if (!CD_STEPS.includes(sname.trim())) {
+        throw new Error(
+          `Part "${name}" (row ${r + 1}): step "${sname.trim()}" is not in the "${CD_SHEET_NAME}" sheet.`
+        );
+      }
+
       // Synthetic steps (Xử-lý, Sơn-tĩnh-điện, Kiểm khung, Mài khung, Hàn Sắt,
       // Cắt, Ép, Uốn) are named in the sheet but left with a blank time/batch
       // — those get computed later from the part's geometry, so they're kept
@@ -744,7 +750,7 @@ function syntheticStepTime(sname, p, khoiValue, dtBmValue) {
   }
 
   if (isKiemKhungStepName(sname)) {
-    const mat = materialOf(p.loaiKhung);
+    const mat = materialOf(p.loaiKhung) ?? materialOf(p.loaiChiTiet);
     if (!mat) return null;
     const f = KIEM_KHUNG_FACTOR[mat];
     return [Math.ceil(weight * f.weight + f.base), 1];
