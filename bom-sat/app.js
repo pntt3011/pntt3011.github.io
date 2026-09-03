@@ -253,8 +253,14 @@ function detectLayout(rows) {
   const headerIdx = headerRow.r;
   const header = rows[headerIdx] ?? [];
 
+  // Some sheets omit the "Cộng - TOTAL" row entirely and the steel table
+  // just trails into blank-name rows instead — stop there too, otherwise
+  // the scan runs into whatever unrelated table follows (e.g. packaging/
+  // cushion lists) and their reused "1", "2", "3"... codes collide with
+  // the real steel Cụm codes, corrupting the Cụm mass rollup.
   const endIdx = findRowIndex(rows, row =>
-    normText(row?.[1]).startsWith('cộng'), headerIdx + 1
+    normText(row?.[1]).startsWith('cộng') || row?.[1] == null || row?.[1] === '',
+    headerIdx + 1
   )?.r ?? rows.length;
 
   let cdCol = -1;
