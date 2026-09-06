@@ -254,12 +254,15 @@ function detectLayout(rows) {
   const header = rows[headerIdx] ?? [];
 
   // Some sheets omit the "Cộng - TOTAL" row entirely and the steel table
-  // just trails into blank-name rows instead — stop there too, otherwise
-  // the scan runs into whatever unrelated table follows (e.g. packaging/
-  // cushion lists) and their reused "1", "2", "3"... codes collide with
-  // the real steel Cụm codes, corrupting the Cụm mass rollup.
+  // just trails off with no terminator — stop at the first row with BOTH
+  // no code and no name, otherwise the scan runs into whatever unrelated
+  // table follows (e.g. packaging/cushion lists) and their reused
+  // "1", "2", "3"... codes collide with the real steel Cụm codes,
+  // corrupting the Cụm mass rollup. Checking code+name together (not name
+  // alone) avoids mistaking a genuine blank spacer row for the table end.
   const endIdx = findRowIndex(rows, row =>
-    normText(row?.[1]).startsWith('cộng') || row?.[1] == null || row?.[1] === '',
+    normText(row?.[1]).startsWith('cộng') ||
+    ((row?.[0] == null || row?.[0] === '') && (row?.[1] == null || row?.[1] === '')),
     headerIdx + 1
   )?.r ?? rows.length;
 
@@ -378,6 +381,20 @@ function parseParts(rows) {
       ghiChu,
       steps
     });
+  }
+
+  // Duplicate codes (TT/Mã) would silently corrupt computeKhoiValues' code
+  // lookups (byCode overwrites, prefix-matching double counts) — surface
+  // it immediately instead of producing a wrong BOM.
+  const seenCodes = new Map();
+  for (const p of parts) {
+    if (p.code == null) continue;
+    if (seenCodes.has(p.code)) {
+      throw new Error(
+        `Duplicate part code "${p.code}": "${seenCodes.get(p.code)}" and "${p.name}" both use it.`
+      );
+    }
+    seenCodes.set(p.code, p.name);
   }
 
   // A component is a "Cụm" only if some other row's code is a child of its
