@@ -525,14 +525,16 @@ const CAT_AREA_FACTOR = {
   'cắt cơ': { area: 0.0335, base: 5.40 }
 };
 
-// Cắt lazer Pát / Ép cong: flat average time, no part inputs.
+// Ép cong: flat average time, no part inputs.
 const CAT_FLAT_FACTOR = {
-  'cắt lazer pát': 22.69,
   'ép cong': 6.1
 };
 
 // Cắt laser: linear in Dài chi tiết (mm).
 const CAT_LASER_FACTOR = { daiChiTiet: 0.0219, base: 11.12 };
+
+// Cắt lazer Pát: linear in (Dài chi tiết + Dia rộng) × 2 × Dày phôi (mm).
+const CAT_LAZER_PAT_FACTOR = { size: 0.0087, base: 13.47 };
 
 // Uốn (all variants): linear in Rộng*Dày² + Dài chi tiết.
 const UON_FACTOR = { rongDay2: 4.45, daiChiTiet: 0.037, base: 91 };
@@ -596,6 +598,10 @@ function isCatLaserStepName(sname) {
   return normText(sname) === 'cắt laser';
 }
 
+function isCatLazerPatStepName(sname) {
+  return normText(sname) === 'cắt lazer pát';
+}
+
 function isUonStepName(sname) {
   return normText(sname).startsWith('uốn');
 }
@@ -604,7 +610,7 @@ function isSyntheticStepName(sname) {
   return isXuLyStepName(sname) || isSonTinhDienStepName(sname) ||
     isKiemKhungStepName(sname) || isMaiKhungStepName(sname) ||
     isHanSatStepName(sname) || isHanNhomStepName(sname) || isUonStepName(sname) ||
-    isCatLaserStepName(sname) ||
+    isCatLaserStepName(sname) || isCatLazerPatStepName(sname) ||
     catAreaFactor(sname) != null || catFlatFactor(sname) != null;
 }
 
@@ -797,6 +803,13 @@ function syntheticStepTime(sname, p, khoiValue, dtBmValue) {
   if (isCatLaserStepName(sname)) {
     const daiChiTiet = Number(p.daiChiTiet) || 0;
     return [Math.ceil(daiChiTiet * CAT_LASER_FACTOR.daiChiTiet + CAT_LASER_FACTOR.base), 1];
+  }
+
+  if (isCatLazerPatStepName(sname)) {
+    const daiChiTiet = Number(p.daiChiTiet) || 0;
+    const diaRong = Number(p.diaRongHop) || 0;
+    const size = (daiChiTiet + diaRong) * 2 * (Number(p.dayPhoi) || 0);
+    return [Math.ceil(size * CAT_LAZER_PAT_FACTOR.size + CAT_LAZER_PAT_FACTOR.base), 1];
   }
 
   const areaFactor = catAreaFactor(sname);
