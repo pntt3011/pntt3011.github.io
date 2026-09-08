@@ -533,8 +533,9 @@ const CAT_FLAT_FACTOR = {
 // Cắt laser: linear in Dài chi tiết (mm).
 const CAT_LASER_FACTOR = { daiChiTiet: 0.0219, base: 11.12 };
 
-// Cắt lazer Pát: linear in (Dài chi tiết + Dia rộng) × 2 × Dày phôi (mm).
-const CAT_LAZER_PAT_FACTOR = { size: 0.0087, base: 13.47 };
+// Cắt lazer Pát: linear in the sum of the two largest of (Rộng pát, Dia
+// rộng, Dài chi tiết) (mm).
+const CAT_LAZER_PAT_FACTOR = { size: 0.0342, base: 13.76 };
 
 // Uốn (all variants): linear in Rộng*Dày² + Dài chi tiết.
 const UON_FACTOR = { rongDay2: 4.45, daiChiTiet: 0.037, base: 91 };
@@ -806,9 +807,9 @@ function syntheticStepTime(sname, p, khoiValue, dtBmValue) {
   }
 
   if (isCatLazerPatStepName(sname)) {
-    const daiChiTiet = Number(p.daiChiTiet) || 0;
-    const diaRong = Number(p.diaRongHop) || 0;
-    const size = (daiChiTiet + diaRong) * 2 * (Number(p.dayPhoi) || 0);
+    const dims = [p.diaRongHop, p.diaDaiHop, p.daiChiTiet].map(v => Number(v) || 0);
+    dims.sort((a, b) => b - a);
+    const size = dims[0] + dims[1];
     return [Math.ceil(size * CAT_LAZER_PAT_FACTOR.size + CAT_LAZER_PAT_FACTOR.base), 1];
   }
 
