@@ -1,0 +1,749 @@
+<meta charset="utf-8">
+<title>Production Gantt</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f5f2;
+    --surface: #ffffff;
+    --ink: #1c1a17;
+    --ink-dim: #6b665c;
+    --border: #ddd8d0;
+    --border-strong: #c7c1b6;
+    --accent: #3a5a7a;
+    --accent-bg: #e8eef3;
+    /* categorical (dataviz palette, slots 1/3/4 -- validated all-pairs, light) */
+    --cut: #2a78d6;
+    --cut-bg: #e5eefa;
+    --cut-tick: #9ec5f4; /* lighter step, same hue -- subordinate task-tick lane */
+    --coat: #1baf7a;
+    --coat-bg: #e3f5ec;
+    --coat-tick: #a8e0c8; /* lighter step, same hue -- subordinate task-tick lane */
+    --other: #eda100;
+    --other-bg: #fcf1dc;
+    --other-tick: #f6d999; /* lighter step, same hue -- subordinate task-tick lane */
+    --header-bg: #efebe4;
+    --today-line: #b03a2e;
+    --shadow: 0 2px 10px rgba(28, 26, 23, 0.08);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #171613;
+      --surface: #201e1a;
+      --ink: #efe9de;
+      --ink-dim: #a39d8f;
+      --border: #38352e;
+      --border-strong: #4a463c;
+      --accent: #7fa8ce;
+      --accent-bg: #253440;
+      /* categorical (dataviz palette, slots 1/3/4 -- validated all-pairs, dark) */
+      --cut: #3987e5;
+      --cut-bg: #1c2c3d;
+      --cut-tick: #6da7ec;
+      --coat: #199e70;
+      --coat-bg: #17301f;
+      --coat-tick: #3fc399;
+      --other: #c98500;
+      --other-bg: #332608;
+      --other-tick: #e0b040;
+      --header-bg: #211f1a;
+      --today-line: #e0685a;
+      --shadow: 0 2px 14px rgba(0, 0, 0, 0.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #171613;
+    --surface: #201e1a;
+    --ink: #efe9de;
+    --ink-dim: #a39d8f;
+    --border: #38352e;
+    --border-strong: #4a463c;
+    --accent: #7fa8ce;
+    --accent-bg: #253440;
+    --cut: #3987e5;
+    --cut-bg: #1c2c3d;
+    --cut-tick: #6da7ec;
+    --coat: #199e70;
+    --coat-bg: #17301f;
+    --coat-tick: #3fc399;
+    --other: #c98500;
+    --other-bg: #332608;
+    --other-tick: #e0b040;
+    --header-bg: #211f1a;
+    --today-line: #e0685a;
+    --shadow: 0 2px 14px rgba(0, 0, 0, 0.4);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-size: 13px;
+    padding: 20px 16px 40px;
+  }
+
+  .wrap {
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0 0 2px;
+    letter-spacing: -0.01em;
+  }
+
+  .subtitle {
+    color: var(--ink-dim);
+    font-size: 12.5px;
+    margin: 0 0 18px;
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+    position: sticky;
+    left: 0;
+  }
+
+  .nav-btn {
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 7px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .nav-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .week-label {
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 600;
+    font-size: 13px;
+    padding: 0 4px;
+    min-width: 190px;
+  }
+
+  .legend {
+    display: flex;
+    gap: 14px;
+    margin-left: auto;
+    font-size: 11.5px;
+    color: var(--ink-dim);
+    flex-wrap: wrap;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+  .grid-scroll {
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    max-height: 78vh;
+  }
+
+  table.gantt {
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 12px;
+    table-layout: fixed;
+  }
+
+  .row-label {
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    background: var(--header-bg);
+    border-right: 1px solid var(--border-strong);
+    border-bottom: 1px solid var(--border);
+    padding: 5px 10px;
+    font-weight: 600;
+    white-space: normal;
+    overflow-wrap: break-word;
+    font-size: 11.5px;
+    line-height: 1.25;
+    min-width: 168px;
+    max-width: 168px;
+    color: var(--ink);
+    vertical-align: middle;
+  }
+  .row-label .core-idx {
+    color: var(--ink-dim);
+    font-weight: 500;
+    font-family: "IBM Plex Mono", monospace;
+  }
+
+  .corner {
+    position: sticky;
+    top: 0;
+    left: 0;
+    z-index: 5;
+    background: var(--header-bg);
+    border-right: 1px solid var(--border-strong);
+    border-bottom: 1px solid var(--border-strong);
+  }
+
+  thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--header-bg);
+    border-bottom: 1px solid var(--border-strong);
+    border-right: 1px solid var(--border);
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--ink-dim);
+    padding: 5px 2px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  thead th.daytop {
+    font-size: 11.5px;
+    color: var(--ink);
+    font-weight: 700;
+  }
+  thead tr:first-child th { border-bottom: 1px solid var(--border); }
+
+  .row-track-cell {
+    padding: 0;
+    position: relative;
+    height: 62px;
+    border-bottom: 1px solid var(--border);
+  }
+  .row-track {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 100%;
+  }
+
+  .bar {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    border-radius: 4px;
+    font-size: 9px;
+    line-height: 1.15;
+    color: #12100d;
+    padding: 2px 5px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0;
+    overflow: hidden;
+    cursor: pointer;
+    border: 1px solid rgba(0,0,0,0.18);
+  }
+  .bar .line {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .bar .line:first-child { font-weight: 600; opacity: 0.9; }
+  .bar .line:nth-child(4), .bar .line:nth-child(5) { opacity: 0.85; font-weight: 400; }
+  .bar:hover, .bar:focus-visible { filter: brightness(1.08); outline: 2px solid var(--ink); outline-offset: 1px; }
+  .bar:focus-visible { outline-color: var(--accent); }
+
+  /* two-lane cutting/coating row: top lane = merged attribute block,
+     bottom lane = every individual task as its own tick at its real time,
+     no merging in that lane. */
+  .bar-merged {
+    top: 3px;
+    bottom: 33px;
+    flex-direction: row;
+    padding: 0 5px;
+  }
+  .bar-merged .tier-attr {
+    font-weight: 700;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .task-tick {
+    position: absolute;
+    top: 34px;
+    bottom: 3px;
+    border-radius: 3px;
+    font-size: 8px;
+    line-height: 1.1;
+    color: #12100d;
+    padding: 1px 3px;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    white-space: nowrap;
+    cursor: pointer;
+    border: 1px solid rgba(0,0,0,0.15);
+  }
+  .task-tick .line { overflow: hidden; text-overflow: ellipsis; }
+  .task-tick:hover, .task-tick:focus-visible { filter: brightness(1.1); outline: 1px solid var(--ink); outline-offset: 0; }
+  .task-tick:focus-visible { outline-color: var(--accent); }
+  .task-tick.cut { background: var(--cut-tick); }
+  .task-tick.coat { background: var(--coat-tick); }
+  .task-tick.other { background: var(--other-tick); }
+
+  .bar.cut { background: var(--cut); }
+  .bar.coat { background: var(--coat); }
+  .bar.other { background: var(--other); }
+
+  .today-marker {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--today-line);
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  /* detail panel */
+  .panel-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 18, 15, 0.4);
+    display: none;
+    z-index: 10;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 8vh 16px;
+  }
+  .panel-backdrop.open { display: flex; }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    max-width: 560px;
+    width: 100%;
+    max-height: 76vh;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  .panel-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 1;
+    background: none;
+    border: none;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--ink-dim);
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+  .panel-close:hover { color: var(--ink); background: var(--other-bg); }
+
+  /* top block: the merged cell as a whole */
+  .panel-summary {
+    padding: 16px 40px 14px 18px;
+    background: var(--accent-bg);
+    border-bottom: 1px solid var(--border-strong);
+  }
+  .panel-summary-label {
+    margin: 0 0 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .panel-summary h2 {
+    font-size: 14.5px;
+    margin: 0 0 4px;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+  .panel-summary .meta {
+    font-size: 11.5px;
+    color: var(--ink-dim);
+    font-family: "IBM Plex Mono", monospace;
+  }
+  .panel-count {
+    font-size: 11px;
+    color: var(--ink-dim);
+    margin: 6px 0 0;
+    font-family: "IBM Plex Mono", monospace;
+  }
+
+  /* bottom block: per-task breakdown */
+  .panel-body {
+    padding: 12px 18px 16px;
+    overflow-y: auto;
+  }
+  .panel-body-label {
+    margin: 0 0 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .panel-body ol {
+    margin: 0;
+    padding-left: 20px;
+  }
+  .panel-body li {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+  .panel-body li .seq {
+    color: var(--accent);
+    font-size: 10.5px;
+    font-weight: 600;
+    font-family: "IBM Plex Mono", monospace;
+    margin-bottom: 3px;
+  }
+  .panel-body li .line:first-child { color: var(--ink-dim); font-size: 11px; font-family: "IBM Plex Mono", monospace; }
+  .panel-body li .line:nth-child(2) { font-weight: 600; }
+  .panel-body li .line:nth-child(4),
+  .panel-body li .line:nth-child(5) { color: var(--ink-dim); font-size: 11px; font-family: "IBM Plex Mono", monospace; }
+  .panel-body li:last-child { border-bottom: none; }
+
+  @media (max-width: 640px) {
+    .row-label { min-width: 130px; max-width: 130px; font-size: 10.5px; }
+  }
+</style>
+
+<div class="wrap">
+  <h1>Production Gantt</h1>
+  <p class="subtitle">Heuristic schedule (EDD + slack) &middot; 12h/day per core &middot; from 15/09/2026</p>
+
+  <div class="toolbar">
+    <button class="nav-btn" id="prevBtn" type="button">&larr; Prev week</button>
+    <span class="week-label" id="weekLabel"></span>
+    <button class="nav-btn" id="nextBtn" type="button">Next week &rarr;</button>
+    <div class="legend">
+      <span><span class="swatch" style="background:var(--cut)"></span>Cutting</span>
+      <span><span class="swatch" style="background:var(--coat)"></span>Coating</span>
+      <span><span class="swatch" style="background:var(--other)"></span>Other steps</span>
+      <span>Consecutive same-attribute tasks merge into one block - click for order &amp; timing</span>
+    </div>
+  </div>
+
+  <div class="grid-scroll">
+    <table class="gantt" id="ganttTable"></table>
+  </div>
+</div>
+
+<div class="panel-backdrop" id="panelBackdrop">
+  <div class="panel" role="dialog" aria-modal="true" aria-labelledby="panelTitle">
+    <button class="panel-close" id="panelClose" type="button" aria-label="Close">&times;</button>
+    <div class="panel-summary">
+      <p class="panel-summary-label" id="panelSummaryLabel">Merged block</p>
+      <h2 id="panelTitle">Cell detail</h2>
+      <div class="meta" id="panelMeta"></div>
+      <p class="panel-count" id="panelCount"></p>
+    </div>
+    <div class="panel-body">
+      <p class="panel-body-label" id="panelBodyLabel">Tasks in cut order</p>
+      <ol id="panelList"></ol>
+    </div>
+  </div>
+</div>
+
+<script src="gantt_data.json" type="application/json" id="__unused"></script>
+<script>
+  const DAY_START = new Date(Date.UTC(2026, 8, 15)); // 15 Sep 2026
+  const HOURS_PER_DAY = 12;
+  const SEC_PER_HOUR = 3600;
+  const SEC_PER_DAY = HOURS_PER_DAY * SEC_PER_HOUR;
+  const DAYS_PER_PAGE = 7;
+  const DAY_PX = 264; // width of one day column
+
+  // Real working shifts per day, totaling the model's 12 work-hours/day:
+  // 07:00-10:30, 12:00-15:30, 16:00-21:00 (breaks 10:30-12:00, 15:30-16:00).
+  const SHIFTS = [
+    { startH: 7, endH: 10.5 },
+    { startH: 12, endH: 15.5 },
+    { startH: 16, endH: 21 },
+  ];
+  const SHIFT_SEC = SHIFTS.map((s) => (s.endH - s.startH) * SEC_PER_HOUR);
+
+  // Convert an abstract "work seconds elapsed since t=0" offset (the
+  // scheduler's own timeline, 12 work-hours/day with no shift structure)
+  // into the real wall-clock Date it falls on, given the day's 3 real
+  // shifts. workSec is clamped into the day's total work-seconds; a value
+  // that lands exactly on a shift boundary attaches to the shift it enters.
+  function workSecondsToDate(workSec) {
+    const dayIdx = Math.floor(workSec / SEC_PER_DAY);
+    let remaining = workSec - dayIdx * SEC_PER_DAY;
+    let shiftIdx = 0;
+    while (shiftIdx < SHIFTS.length - 1 && remaining >= SHIFT_SEC[shiftIdx]) {
+      remaining -= SHIFT_SEC[shiftIdx];
+      shiftIdx++;
+    }
+    const shift = SHIFTS[shiftIdx];
+    const dayStart = new Date(DAY_START.getTime() + dayIdx * 86400000);
+    return new Date(dayStart.getTime() + shift.startH * 3600000 + remaining * 1000);
+  }
+
+  function fmtDate(d) {
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}`;
+  }
+  function fmtTime(d) {
+    const hh = String(d.getUTCHours()).padStart(2, "0");
+    const mi = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${hh}:${mi}`;
+  }
+  function dowLabel(d) {
+    return ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getUTCDay()];
+  }
+
+  let rows = [];
+  let weekIndex = 0;
+  let totalWeeks = 1;
+
+  const LABEL_PX = 168; // must match .row-label min/max-width in CSS
+
+  function buildTable() {
+    const table = document.getElementById("ganttTable");
+    table.innerHTML = "";
+
+    const startDayIdx = weekIndex * DAYS_PER_PAGE;
+    const dayCount = DAYS_PER_PAGE;
+    const rangeStartSec = startDayIdx * SEC_PER_DAY;
+    const rangeEndSec = (startDayIdx + dayCount) * SEC_PER_DAY;
+
+    table.style.width = `${LABEL_PX + dayCount * DAY_PX}px`;
+
+    const thead = document.createElement("thead");
+    const trDays = document.createElement("tr");
+    const corner = document.createElement("th");
+    corner.className = "corner";
+    corner.style.width = `${LABEL_PX}px`;
+    corner.style.minWidth = `${LABEL_PX}px`;
+    trDays.appendChild(corner);
+
+    for (let d = 0; d < dayCount; d++) {
+      const date = new Date(DAY_START.getTime() + (startDayIdx + d) * 86400000);
+      const th = document.createElement("th");
+      th.className = "daytop";
+      th.style.width = `${DAY_PX}px`;
+      th.style.minWidth = `${DAY_PX}px`;
+      th.textContent = `${dowLabel(date)} ${fmtDate(date)}`;
+      trDays.appendChild(th);
+    }
+    thead.appendChild(trDays);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+
+    for (const row of rows) {
+      const tr = document.createElement("tr");
+      const labelTd = document.createElement("td");
+      labelTd.className = "row-label";
+      labelTd.innerHTML = `${row.group} <span class="core-idx">#${row.core + 1}</span>`;
+      tr.appendChild(labelTd);
+
+      const trackTd = document.createElement("td");
+      trackTd.className = "row-track-cell";
+      trackTd.colSpan = dayCount;
+      trackTd.style.width = `${dayCount * DAY_PX}px`;
+      trackTd.style.backgroundImage = `repeating-linear-gradient(to right, var(--border-strong) 0, var(--border-strong) 2px, transparent 2px, transparent ${DAY_PX}px)`;
+      const track = document.createElement("div");
+      track.className = "row-track";
+      trackTd.appendChild(track);
+
+      // bars positioned by true time offset in px -- consecutive tasks
+      // within the same day render as separate adjacent bars matching their
+      // real sub-ranges, instead of stacking on top of each other.
+      for (const cell of row.cells) {
+        if (cell.end <= rangeStartSec || cell.start >= rangeEndSec) continue;
+        const clampedStart = Math.max(cell.start, rangeStartSec);
+        const clampedEnd = Math.min(cell.end, rangeEndSec);
+        const leftPx = ((clampedStart - rangeStartSec) / SEC_PER_DAY) * DAY_PX;
+        const widthPx = Math.max(10, ((clampedEnd - clampedStart) / SEC_PER_DAY) * DAY_PX);
+
+        const bar = document.createElement("div");
+        const cls = row.group === "Cắt laser" || row.group === "Cắt CNC" || row.group === "Cắt cơ"
+          ? "cut" : (row.group === "Sơn tĩnh điện" ? "coat" : "other");
+        bar.className = "bar " + cls;
+        bar.style.left = `${leftPx + 1}px`;
+        bar.style.width = `${widthPx - 2}px`;
+        bar.tabIndex = 0;
+        bar.setAttribute("role", "button");
+
+        const isMergedCell = cell.label_lines_list.length > 1;
+        const attrText = cell.attributes.length === 1
+          ? cell.attributes[0]
+          : `${cell.attributes.length} attributes`;
+
+        if (!isMergedCell) {
+          const barLines = cell.label_lines_list[0] || [];
+          bar.innerHTML = barLines.map((l) => `<span class="line">${escapeHtml(l)}</span>`).join("");
+        } else {
+          // two-tier for every merged cell: top = merged attribute block,
+          // bottom = every individual task as its own tick at its real time
+          // position (no merging in this lane).
+          bar.classList.add("bar-merged");
+          bar.innerHTML = `<div class="tier tier-attr"><span class="line">${escapeHtml(attrText)}</span></div>`;
+        }
+        bar.addEventListener("click", () => openPanel(row, cell));
+        bar.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPanel(row, cell); }
+        });
+
+        track.appendChild(bar);
+
+        if (isMergedCell) {
+          cell.task_spans.forEach((span, i) => {
+            if (span[1] <= rangeStartSec || span[0] >= rangeEndSec) return;
+            const tClampedStart = Math.max(span[0], rangeStartSec);
+            const tClampedEnd = Math.min(span[1], rangeEndSec);
+            const tLeftPx = ((tClampedStart - rangeStartSec) / SEC_PER_DAY) * DAY_PX;
+            const tWidthPx = Math.max(3, ((tClampedEnd - tClampedStart) / SEC_PER_DAY) * DAY_PX);
+
+            const tick = document.createElement("div");
+            tick.className = "task-tick " + cls;
+            tick.style.left = `${tLeftPx + 1}px`;
+            tick.style.width = `${tWidthPx - 1}px`;
+            tick.tabIndex = 0;
+            tick.setAttribute("role", "button");
+            const lines = cell.label_lines_list[i] || [];
+            const partName = lines[2] || "";
+            tick.title = lines.join(" - ");
+            tick.innerHTML = `<span class="line">${escapeHtml(partName)}</span>`;
+            tick.addEventListener("click", (e) => { e.stopPropagation(); openPanel(row, cell, i); });
+            tick.addEventListener("keydown", (e) => {
+              if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); openPanel(row, cell, i); }
+            });
+            track.appendChild(tick);
+          });
+        }
+      }
+
+      tr.appendChild(trackTd);
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+
+    // today marker (t=0 is DAY_START -- shown only if within page range)
+    document.getElementById("weekLabel").textContent =
+      `${fmtDate(new Date(DAY_START.getTime() + startDayIdx * 86400000))} - ${fmtDate(new Date(DAY_START.getTime() + (startDayIdx + dayCount - 1) * 86400000))}  (week ${weekIndex + 1} / ${totalWeeks})`;
+
+    document.getElementById("prevBtn").disabled = weekIndex === 0;
+    document.getElementById("nextBtn").disabled = weekIndex >= totalWeeks - 1;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[c]));
+  }
+
+  function openPanel(row, cell, taskIndex) {
+    const backdrop = document.getElementById("panelBackdrop");
+    const summaryLabel = document.getElementById("panelSummaryLabel");
+    const bodyLabel = document.getElementById("panelBodyLabel");
+    const title = document.getElementById("panelTitle");
+    const meta = document.getElementById("panelMeta");
+    const count = document.getElementById("panelCount");
+    const list = document.getElementById("panelList");
+
+    const n = cell.label_lines_list.length;
+    const isMerged = n > 1;
+    const single = taskIndex != null; // clicked one task-tick: show just that task
+
+    summaryLabel.textContent = single ? "Task" : (isMerged ? "Merged block" : "Task");
+    bodyLabel.textContent = single ? "Task detail" : (isMerged ? "Tasks in schedule order" : "Task detail");
+
+    let titleSuffix = "";
+    if (isMerged && !single) {
+      titleSuffix = cell.attributes.length === 1
+        ? " - " + cell.attributes[0]
+        : ` - ${cell.attributes.length} attributes`;
+    }
+    title.textContent = `${row.group} #${row.core + 1}${titleSuffix}`;
+
+    const summaryStart = single ? cell.task_spans[taskIndex][0] : cell.start;
+    const summaryEnd = single ? cell.task_spans[taskIndex][1] : cell.end;
+    const startDate = workSecondsToDate(summaryStart);
+    const endDate = workSecondsToDate(summaryEnd);
+    const durH = ((summaryEnd - summaryStart) / 3600).toFixed(1);
+    meta.textContent = `${fmtDate(startDate)} -> ${fmtDate(endDate)}  |  ${durH}h`;
+    count.textContent = single ? "1 task" : `${n} task${n === 1 ? "" : "s"} in this cell`;
+
+    const indices = single ? [taskIndex] : cell.label_lines_list.map((_, i) => i);
+
+    list.innerHTML = "";
+    indices.forEach((i) => {
+      const lines = cell.label_lines_list[i];
+      const li = document.createElement("li");
+      const span = cell.task_spans[i];
+      const tStart = workSecondsToDate(span[0]);
+      const tEnd = workSecondsToDate(span[1]);
+      const tDurH = ((span[1] - span[0]) / 3600).toFixed(1);
+      const seq = document.createElement("div");
+      seq.className = "seq";
+      seq.textContent = single
+        ? `${fmtDate(tStart)} ${fmtTime(tStart)} -> ${fmtDate(tEnd)} ${fmtTime(tEnd)}  (${tDurH}h)`
+        : `#${i + 1}  ·  ${fmtDate(tStart)} ${fmtTime(tStart)} -> ${fmtDate(tEnd)} ${fmtTime(tEnd)}  (${tDurH}h)`;
+      li.appendChild(seq);
+      lines.forEach((l) => {
+        const div = document.createElement("div");
+        div.className = "line";
+        div.textContent = l;
+        li.appendChild(div);
+      });
+      list.appendChild(li);
+    });
+
+    backdrop.classList.add("open");
+  }
+
+  document.getElementById("panelClose").addEventListener("click", () => {
+    document.getElementById("panelBackdrop").classList.remove("open");
+  });
+  document.getElementById("panelBackdrop").addEventListener("click", (e) => {
+    if (e.target.id === "panelBackdrop") e.currentTarget.classList.remove("open");
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") document.getElementById("panelBackdrop").classList.remove("open");
+  });
+
+  document.getElementById("prevBtn").addEventListener("click", () => {
+    if (weekIndex > 0) { weekIndex--; buildTable(); }
+  });
+  document.getElementById("nextBtn").addEventListener("click", () => {
+    if (weekIndex < totalWeeks - 1) { weekIndex++; buildTable(); }
+  });
+
+  fetch("gantt_data.json")
+    .then((r) => r.json())
+    .then((data) => {
+      rows = data;
+      const maxEnd = Math.max(0, ...rows.flatMap((r) => r.cells.map((c) => c.end)));
+      const totalDays = Math.ceil(maxEnd / SEC_PER_DAY) || 1;
+      totalWeeks = Math.max(1, Math.ceil(totalDays / DAYS_PER_PAGE));
+      buildTable();
+    });
+</script>
