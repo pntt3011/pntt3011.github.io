@@ -508,8 +508,8 @@ const KIEM_KHUNG_FACTOR = {
   'nhôm': { weight: 63.59, base: 77.70 }
 };
 
-// Hàn Mig (Sắt) / Hàn Laser Sắt: linear in Khối lượng + Diện tích bề mặt.
-// Hàn Robot (Sắt) is intentionally excluded — stays manual.
+// Hàn Mig (Sắt) / Hàn Laser Sắt / Hàn Robot (Sắt): linear in Khối lượng +
+// Diện tích bề mặt.
 const HAN_SAT_FACTOR = { weight: 44.10, area: 60.39, base: 74.72 };
 
 // Hàn Tig (Nhôm) / Hàn Laser Nhôm: linear in Khối lượng only.
@@ -579,7 +579,7 @@ function isMaiKhungStepName(sname) {
 
 function isHanSatStepName(sname) {
   const t = normText(sname);
-  return t === 'hàn mig (sắt)' || t === 'hàn laser sắt';
+  return t === 'hàn mig (sắt)' || t === 'hàn laser sắt' || t === 'hàn robot (sắt)';
 }
 
 function isHanNhomStepName(sname) {
