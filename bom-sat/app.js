@@ -405,6 +405,19 @@ function parseParts(rows) {
     p.loai = hasChild ? 'Cụm' : 'Chi Tiết';
   }
 
+  // The source SL is the total per product, not per parent. Convert to
+  // per-parent by dividing by the parent's total SL (original values are read
+  // first so the result doesn't depend on row order).
+  const totalSl = new Map(parts.filter(p => p.code != null).map(p => [p.code, Number(p.sl)]));
+  for (const p of parts) {
+    if (p.code == null) continue;
+    const dot = p.code.lastIndexOf('.');
+    if (dot < 0) continue;
+    const parentSl = totalSl.get(p.code.slice(0, dot));
+    const sl = Number(p.sl);
+    if (parentSl > 0 && isFinite(sl) && p.sl !== '' && p.sl != null) p.sl = sl / parentSl;
+  }
+
   return parts;
 }
 
@@ -475,9 +488,9 @@ function computeKhoiValues(parts) {
 
   for (const p of cumRows) {
     const children = directChildren.get(p) ?? [];
-    const cumSl = Number(p.sl) || 1;
-    khoiValue.set(p, children.reduce((sum, c) => sum + khoiValue.get(c) * ((Number(c.sl) || 0) / cumSl), 0));
-    dtBmValue.set(p, children.reduce((sum, c) => sum + dtBmValue.get(c) * ((Number(c.sl) || 0) / cumSl), 0));
+    // c.sl is already per-parent (see parse), so no division by the Cụm's SL.
+    khoiValue.set(p, children.reduce((sum, c) => sum + khoiValue.get(c) * (Number(c.sl) || 0), 0));
+    dtBmValue.set(p, children.reduce((sum, c) => sum + dtBmValue.get(c) * (Number(c.sl) || 0), 0));
   }
 
   return { khoiValue, dtBmValue, directChildren };
@@ -716,11 +729,10 @@ function fillBom(ws, prod, parts) {
     if (p.loai === 'Cụm') {
       const children = directChildren.get(p) ?? [];
       const rowRefs = children.map(c => rowOf.get(c));
-      const cumSlRef = `F${r}`;
 
       if (rowRefs.length) {
-        setFormula(ws, r, 13, rowRefs.map(cr => `M${cr}*F${cr}/${cumSlRef}`).join('+'), khoiValue.get(p));
-        setFormula(ws, r, 14, rowRefs.map(cr => `N${cr}*F${cr}/${cumSlRef}`).join('+'), dtBmValue.get(p));
+        setFormula(ws, r, 13, rowRefs.map(cr => `M${cr}*F${cr}`).join('+'), khoiValue.get(p));
+        setFormula(ws, r, 14, rowRefs.map(cr => `N${cr}*F${cr}`).join('+'), dtBmValue.get(p));
       } else {
         setCell(ws, r, 13, 0);
         setCell(ws, r, 14, 0);
